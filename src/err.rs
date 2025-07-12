@@ -4,7 +4,8 @@ pub type CommandResult<T = ()> = std::result::Result<T, CommandError>;
 #[derive(Debug)]
 pub enum CommandError {
     DatabaseError(sqlx::Error),
-    LogicError(String),
+    /// Non critical; String is reason
+    Other(String),
 }
 
 impl fmt::Display for CommandError {
@@ -17,7 +18,7 @@ impl std::error::Error for CommandError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             CommandError::DatabaseError(e) => Some(e),
-            CommandError::LogicError(_) => None,
+            CommandError::Other(_) => None,
         }
     }
 }
@@ -30,6 +31,12 @@ impl From<sqlx::Error> for CommandError {
 
 impl From<&str> for CommandError {
     fn from(s: &str) -> Self {
-        CommandError::LogicError(s.to_string())
+        CommandError::Other(s.to_string())
+    }
+}
+
+impl From<String> for CommandError {
+    fn from(s: String) -> Self {
+        CommandError::Other(s)
     }
 }

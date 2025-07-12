@@ -1,10 +1,12 @@
 use crate::{
+    DB_PATH,
     db::{WorktimeDatabase, WorktimeSession},
     err::CommandResult,
 };
 use chrono::{DateTime, Local, NaiveDateTime, TimeDelta};
 use clap::{CommandFactory, Parser, Subcommand};
 use dialoguer::{Select, theme::ColorfulTheme};
+use std::process::Command;
 use strum::{Display, EnumIter, IntoEnumIterator};
 
 #[derive(Parser)]
@@ -24,6 +26,8 @@ pub enum WorktimeCommand {
     Stop,
     /// Report today's total work time
     Report,
+    /// Sqlite3
+    Sql,
 }
 
 #[derive(Debug, EnumIter, Display, Clone, Copy)]
@@ -36,6 +40,8 @@ enum ExtendedCommand {
     Stop,
     /// Report today's total work time
     Report,
+    /// Sqlite3
+    Sql,
     /// Print Claps help
     Help,
     /// Do nothing
@@ -73,6 +79,7 @@ impl WorktimeCommand {
             ExtendedCommand::Start => WorktimeCommand::Start,
             ExtendedCommand::Stop => WorktimeCommand::Stop,
             ExtendedCommand::Report => WorktimeCommand::Report,
+            ExtendedCommand::Sql => WorktimeCommand::Sql,
             ExtendedCommand::Help => {
                 <Cli as CommandFactory>::command()
                     .print_help()
@@ -91,13 +98,14 @@ impl WorktimeCommand {
             WorktimeCommand::Start => self.start(db).await,
             WorktimeCommand::Stop => self.stop(db).await,
             WorktimeCommand::Report => self.report(db).await,
+            WorktimeCommand::Sql => self.sqlite(),
         };
         if let Err(e) = r {
             match e {
                 crate::err::CommandError::DatabaseError(error) => {
                     eprintln!("{self:?} failed with: {error}")
                 }
-                crate::err::CommandError::LogicError(reason) => {
+                crate::err::CommandError::Other(reason) => {
                     eprintln!("{self:?} skipped due to: {reason}")
                 }
             };
@@ -150,6 +158,16 @@ impl WorktimeCommand {
         let hours = delta.num_minutes() as f64 / 60f64;
         println!("Today's balance: {hours:.2}h",);
         Ok(())
+    }
+
+    fn sqlite(&self) -> CommandResult {
+        match Command::new("sqlite3").arg(DB_PATH).spawn() {
+            Ok(mut child) => {
+                child.wait().expect("Failed to wait on sqlite3");
+                Ok(())
+            }
+            Err(_) => Err("Doesn't seem like you got sqlite3 installed or in $PATH".into()),
+        }
     }
 }
 
