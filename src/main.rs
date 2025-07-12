@@ -1,38 +1,30 @@
-use cli::Command;
+use cli::WorktimeCommand;
+use db::WorktimeDatabase;
 use sqlx::{
     migrate::Migrator,
     sqlite::{SqliteConnectOptions, SqlitePool},
 };
-use std::error::Error;
 
 mod cli;
 mod db;
+mod err;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    let command = Command::parse_or_exit();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut command = WorktimeCommand::parse_or_prompt();
 
     let opts = SqliteConnectOptions::new()
         .filename("./worktime.db")
         .create_if_missing(true);
-
-    println!("sqlite connect");
     let pool = SqlitePool::connect_with(opts).await?;
-    println!("sqlite connected");
-
-    println!("migration");
     MIGRATOR.run(&pool).await?;
-    println!("migration done");
 
-    println!("executing command");
-    match command {
-        Command::Start => db::start(&pool).await?,
-        Command::Stop => db::stop(&pool).await?,
-        Command::Report => db::report(&pool).await?,
+    let db = WorktimeDatabase::new(pool);
+
+    loop {
+        command.execute(&db).await;
+        command = WorktimeCommand::prompt();
     }
-    println!("executed command");
-
-    Ok(())
 }
