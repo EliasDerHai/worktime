@@ -15,5 +15,7 @@ wt
 
 
 Notes: 
-- Sessions can be no longer than 12h (forgot to stop)
+- Sessions should be limited to 12h max (probably forgot to stop)
+- in prod clap mode doesn't seem to work (subcommands?) 
+- report with additional subcommand ? like `report -- day` or `report -- week`?
 
