@@ -2,8 +2,8 @@ use crate::{
     DB_PATH,
     db::{WorktimeDatabase, WorktimeSession},
     err::CommandResult,
+    time::*,
 };
-use chrono::{DateTime, Local, NaiveDateTime, TimeDelta};
 use clap::{CommandFactory, Parser, Subcommand};
 use dialoguer::{Select, theme::ColorfulTheme};
 use std::process::Command;
@@ -154,7 +154,7 @@ impl WorktimeCommand {
 
     async fn report(&self, db: &WorktimeDatabase) -> CommandResult {
         let sessions = db.get_todays_sessions().await?;
-        let delta = aggregate_session_times(sessions);
+        let delta = aggregate_session_times(&sessions);
         let hours = delta.num_minutes() as f64 / 60f64;
         println!("Today's balance: {hours:.2}h",);
         Ok(())
@@ -169,48 +169,4 @@ impl WorktimeCommand {
             Err(_) => Err("Doesn't seem like you got sqlite3 installed or in $PATH".into()),
         }
     }
-}
-
-fn display_time(
-    time: &NaiveDateTime,
-) -> chrono::format::DelayedFormat<chrono::format::StrftimeItems<'_>> {
-    time.format("%H:%M:%S")
-}
-
-fn get_now() -> NaiveDateTime {
-    Local::now().naive_local()
-}
-
-fn get_utc_zero() -> NaiveDateTime {
-    DateTime::from_timestamp_millis(0).unwrap().naive_local()
-}
-
-/// asserts no overlap and start before end (might panic)
-fn aggregate_session_times(mut sessions: Vec<WorktimeSession>) -> TimeDelta {
-    if !sessions.is_sorted_by_key(|s| s.id) {
-        sessions.sort_by_key(|s| s.id);
-    }
-
-    sessions
-        .iter()
-        .fold(
-            (TimeDelta::zero(), get_utc_zero()),
-            |(curr, last_end), WorktimeSession { id: _, start, end }| {
-                let start = *start;
-                let end = end.unwrap_or(get_now());
-
-                assert!(
-                    end > start,
-                    "Corrupt data - Session end {end:?} before start {start:?}"
-                );
-                assert!(
-                    start > last_end,
-                    "Corrupt data - Session overlap prev. end {end:?} after next start {start:?}"
-                );
-
-                let delta = curr + (end - start);
-                (delta, end)
-            },
-        )
-        .0
 }

@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use cli::WorktimeCommand;
 use db::WorktimeDatabase;
 use sqlx::{
@@ -10,6 +8,7 @@ use sqlx::{
 mod cli;
 mod db;
 mod err;
+mod time;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 pub static DB_PATH: &str = "worktime.db";

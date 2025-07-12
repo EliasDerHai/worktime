@@ -1,12 +1,23 @@
+use std::fmt::Display;
+
 use chrono::{Local, NaiveDateTime};
 use sqlx::{Error, SqlitePool};
 
-use crate::err::CommandResult;
+use crate::{
+    err::CommandResult,
+    time::{get_now, get_utc_zero},
+};
 
 type Result<T> = sqlx::Result<T>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WorktimeSessionId(u32);
+
+impl Display for WorktimeSessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
 
 impl From<i64> for WorktimeSessionId {
     fn from(value: i64) -> Self {
@@ -28,6 +39,11 @@ pub struct WorktimeDatabase {
 
 impl WorktimeDatabase {
     pub fn new(pool: SqlitePool) -> Self {
+        let p2: SqlitePool = pool.clone();
+        tokio::spawn(async {
+            let _ = sanity_check(p2).await;
+        });
+        println!("init");
         Self { pool }
     }
 
@@ -117,4 +133,60 @@ impl WorktimeDatabase {
             Err(Error::RowNotFound)
         }
     }
+}
+
+async fn sanity_check(pool: SqlitePool) -> Result<()> {
+    let open_sessions = sqlx::query!(
+        "
+        SELECT count(*) as open_sessions
+        FROM work_sessions 
+        WHERE end_time IS NULL
+        "
+    )
+    .fetch_one(&pool)
+    .await?
+    .open_sessions;
+
+    match open_sessions {
+        0 | 1 => (),
+        n => panic!("Corrupt data - {n} sessions running!"),
+    }
+
+    let mut all_sessions: Vec<WorktimeSession> = sqlx::query!("
+        SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  
+        FROM work_sessions 
+    ")
+        .fetch_all(&pool)
+        .await?
+        .iter()
+        .map(|r| WorktimeSession {
+            id: r.id.into(),
+            start: r.start_time,
+            end: r.end_time,
+        })
+        .collect();
+
+    if !all_sessions.is_sorted_by_key(|s| s.start) {
+        all_sessions.sort_by_key(|s| s.start);
+    };
+
+    all_sessions.into_iter().fold(
+        get_utc_zero(),
+        |last_end, WorktimeSession { id, start, end }| {
+            let end = end.unwrap_or(get_now());
+
+            assert!(
+                end > start,
+                "Corrupt data - Session '{id}' end {end:?} before start {start:?}"
+            );
+            assert!(
+                start > last_end,
+                "Corrupt data - Session '{id}' overlap prev. end {end:?} after next start {start:?}"
+            );
+
+            end
+        },
+    );
+
+    Ok(())
 }
