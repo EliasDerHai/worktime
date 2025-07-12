@@ -1,6 +1,9 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use dialoguer::{Select, theme::ColorfulTheme};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use sqlx::{
+    migrate::Migrator,
+    sqlite::{SqliteConnectOptions, SqlitePool},
+};
 use std::{error::Error, path::Path};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
@@ -36,6 +39,8 @@ enum ExtendedCommand {
     /// Quit
     Quit,
 }
+
+static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -76,24 +81,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let db_path = "worktime.db";
-    let first_run = !Path::new(db_path).exists();
-
     let opts = SqliteConnectOptions::new()
-        .filename(db_path)
+        .filename("./worktime.db")
         .create_if_missing(true);
 
+    println!("sqlite connect");
     let pool = SqlitePool::connect_with(opts).await?;
+    println!("sqlite connected");
 
-    if first_run {
-        db::init_db(&pool).await?;
-    }
+    println!("migration");
+    MIGRATOR.run(&pool).await?;
+    println!("migration done");
 
+    println!("executing command");
     match command {
         Command::Start => db::start(&pool).await?,
         Command::Stop => db::stop(&pool).await?,
         Command::Report => db::report(&pool).await?,
     }
+    println!("executed command");
 
     Ok(())
 }

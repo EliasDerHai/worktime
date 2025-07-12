@@ -1,21 +1,6 @@
 use chrono::Local;
 use sqlx::SqlitePool;
 
-pub async fn init_db(pool: &SqlitePool) -> sqlx::Result<()> {
-    sqlx::query!(
-        r#"
-        CREATE TABLE IF NOT EXISTS work_sessions (
-            id INTEGER PRIMARY KEY,
-            start_time TEXT NOT NULL,
-            stop_time TEXT
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
 pub async fn start(pool: &SqlitePool) -> sqlx::Result<()> {
     let now = Local::now().naive_local();
     sqlx::query!("INSERT INTO work_sessions (start_time) VALUES ($1)", now)
