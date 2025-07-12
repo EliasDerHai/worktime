@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT * FROM work_sessions\n        WHERE date(start_time) = date($1)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "start_time",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "stop_time",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8b38deb3f35ca47fa8153b2aeb66a70fbebb7e059097eee63c4c63f101a4b7dc"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        CREATE TABLE IF NOT EXISTS work_sessions (\n            id INTEGER PRIMARY KEY,\n            start_time TEXT NOT NULL,\n            stop_time TEXT\n        )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "e09d9905ca525af99358b1ceb23f5d36b8aaae3764541afb6741cc12b44d74cf"
+}

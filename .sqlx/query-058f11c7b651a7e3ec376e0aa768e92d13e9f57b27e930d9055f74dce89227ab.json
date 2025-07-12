@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO work_sessions (start_time) VALUES ($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "058f11c7b651a7e3ec376e0aa768e92d13e9f57b27e930d9055f74dce89227ab"
+}
