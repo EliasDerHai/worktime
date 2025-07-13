@@ -5,6 +5,6 @@ ROOT=$(git rev-parse --show-toplevel)
 
 cd "$ROOT"
 
-cargo build
+cargo build --release
 
-cp ./target/debug/worktime /opt/homebrew/bin/wt
+cp ./target/release/worktime /opt/homebrew/bin/wt

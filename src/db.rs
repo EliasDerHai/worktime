@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use chrono::{Local, NaiveDateTime};
+use chrono::{Local, NaiveDate, NaiveDateTime};
 use sqlx::{Error, SqlitePool};
 
 use crate::{
@@ -33,6 +33,13 @@ pub struct WorktimeSession {
     pub end: Option<NaiveDateTime>,
 }
 
+impl From<(i64, NaiveDateTime, Option<NaiveDateTime>)> for WorktimeSession {
+    fn from((id, start, end): (i64, NaiveDateTime, Option<NaiveDateTime>)) -> Self {
+        let id = WorktimeSessionId::from(id);
+        Self { id, start, end }
+    }
+}
+
 pub struct WorktimeDatabase {
     pool: SqlitePool,
 }
@@ -43,7 +50,6 @@ impl WorktimeDatabase {
         tokio::spawn(async {
             let _ = sanity_check(p2).await;
         });
-        println!("init");
         Self { pool }
     }
 
@@ -58,35 +64,29 @@ impl WorktimeDatabase {
         .await;
 
         match last {
-            Ok(last) => Ok(Some(WorktimeSession {
-                id: last.id.into(),
-                start: last.start_time,
-                end: last.end_time,
-            })),
+            Ok(last) => Ok(Some(WorktimeSession::from((
+                last.id,
+                last.start_time,
+                last.end_time,
+            )))),
             Err(sqlx::Error::RowNotFound) => Ok(None),
             Err(e) => Err(e),
         }
     }
 
-    pub async fn get_todays_sessions(&self) -> Result<Vec<WorktimeSession>> {
-        let today = Local::now().naive_local().date();
-        let sessions = sqlx::query!("
+    pub async fn get_sessions_since(&self, day: NaiveDate) -> Result<Vec<WorktimeSession>> {
+        let r = sqlx::query!("
         SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  
         FROM work_sessions 
-        WHERE date(start_time) = date($1)
+        WHERE date(start_time) >= date($1)
         ORDER BY id asc
-    ", today)
-        .fetch_all(&self.pool)
-        .await?
-        .iter()
-    .map(|r| WorktimeSession {
-            id: r.id.into(),
-            start: r.start_time,
-            end: r.end_time,
-        })
-            .collect();
+        ", day).fetch_all(&self.pool).await;
 
-        Ok(sessions)
+        r.map(|rows| {
+            rows.iter()
+                .map(|r| WorktimeSession::from((r.id, r.start_time, r.end_time)))
+                .collect()
+        })
     }
 
     pub async fn insert_start(&self) -> CommandResult<NaiveDateTime> {
@@ -159,11 +159,7 @@ async fn sanity_check(pool: SqlitePool) -> Result<()> {
         .fetch_all(&pool)
         .await?
         .iter()
-        .map(|r| WorktimeSession {
-            id: r.id.into(),
-            start: r.start_time,
-            end: r.end_time,
-        })
+        .map(|r| WorktimeSession::from((r.id, r.start_time, r.end_time)))
         .collect();
 
     if !all_sessions.is_sorted_by_key(|s| s.start) {
