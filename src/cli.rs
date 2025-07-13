@@ -4,16 +4,15 @@ use crate::{
     err::CommandResult,
     time::*,
 };
-use clap::{CommandFactory, Parser, Subcommand};
-use dialoguer::{Select, theme::ColorfulTheme};
-use std::{env, process::Command};
+use clap::{Parser, Subcommand};
+use std::process::Command;
 use strum::{Display, EnumIter, IntoEnumIterator};
 
 #[derive(Parser)]
 #[command(name = "worktime", version)]
-struct Cli {
+pub struct Cli {
     #[command(subcommand)]
-    command: WorktimeCommand,
+    pub command: WorktimeCommand,
 }
 
 /// responsible for stdin/stdout & logic
@@ -36,7 +35,7 @@ pub enum WorktimeCommand {
 }
 
 #[derive(Debug, EnumIter, Display, Clone, Copy)]
-enum ExtendedCommand {
+pub enum ExtendedCommand {
     /// Prints current state
     Status,
     /// Start tracking time
@@ -47,10 +46,16 @@ enum ExtendedCommand {
     Report { kind: ReportKind },
     /// Sqlite3
     Sql,
-    /// Print Claps help
+    /// Print Clap's help
     Help,
     /// Do nothing
     Quit,
+}
+
+impl ExtendedCommand {
+    pub fn wrapped_iter() -> ExtendedCommandIter {
+        ExtendedCommand::iter()
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy, clap::ValueEnum, EnumIter, Display)]
@@ -61,62 +66,19 @@ pub enum ReportKind {
     Month,
 }
 
+impl ReportKind {
+    pub fn wrapped_iter() -> ReportKindIter {
+        ReportKind::iter()
+    }
+}
+
 impl WorktimeCommand {
-    pub fn parse_or_prompt() -> Self {
-        match Cli::try_parse() {
-            Ok(c) => c.command,
-            Err(e) => {
-                if env::args_os().count() > 1 {
-                    let _ = e.print();
-                }
-                Self::prompt()
-            }
-        }
-    }
-
-    pub fn prompt() -> Self {
-        let selection = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("What you want, bruv?")
-            .default(0)
-            .items(
-                ExtendedCommand::iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice(),
-            )
-            .interact()
-            .expect("Can't print select prompt");
-
-        let extended_comm = *ExtendedCommand::iter()
-            .collect::<Vec<ExtendedCommand>>()
-            .get(selection)
-            .unwrap();
-
-        match extended_comm {
-            ExtendedCommand::Status => WorktimeCommand::Status,
-            ExtendedCommand::Start => WorktimeCommand::Start,
-            ExtendedCommand::Stop => WorktimeCommand::Stop,
-            ExtendedCommand::Report { kind: _ } => Self::prompt_report_with_kind(),
-            ExtendedCommand::Sql => WorktimeCommand::Sql,
-            ExtendedCommand::Help => {
-                <Cli as CommandFactory>::command()
-                    .print_help()
-                    .expect("Can't print help");
-                add_linebrakes();
-                Self::prompt()
-            }
-            ExtendedCommand::Quit => {
-                std::process::exit(0);
-            }
-        }
-    }
-
-    pub async fn execute(&self, db: &WorktimeDatabase) {
+    pub async fn execute(&self, db: &WorktimeDatabase, clock: &impl Clock) {
         let r = match self {
             WorktimeCommand::Status => self.status(db).await,
             WorktimeCommand::Start => self.start(db).await,
             WorktimeCommand::Stop => self.stop(db).await,
-            WorktimeCommand::Report { kind } => self.report(db, *kind).await,
+            WorktimeCommand::Report { kind } => self.report(db, *kind, clock).await,
             WorktimeCommand::Sql => self.sqlite(),
         };
         if let Err(e) = r {
@@ -129,7 +91,6 @@ impl WorktimeCommand {
                 }
             };
         }
-        add_linebrakes();
     }
 
     async fn status(&self, db: &WorktimeDatabase) -> CommandResult {
@@ -172,14 +133,19 @@ impl WorktimeCommand {
             .map_err(|e| e.into())
     }
 
-    async fn report(&self, db: &WorktimeDatabase, kind: ReportKind) -> CommandResult {
+    async fn report(
+        &self,
+        db: &WorktimeDatabase,
+        kind: ReportKind,
+        clock: &impl Clock,
+    ) -> CommandResult {
         let ref_day = match kind {
-            ReportKind::Day => get_today(),
-            ReportKind::Week => get_week_start(),
-            ReportKind::Month => get_month_start(),
+            ReportKind::Day => get_today(clock),
+            ReportKind::Week => get_week_start(clock),
+            ReportKind::Month => get_month_start(clock),
         };
         let sessions = db.get_sessions_since(ref_day).await?;
-        let delta = aggregate_session_times(&sessions);
+        let delta = aggregate_session_times(&sessions, clock.get_now());
         let hours = delta.num_minutes() as f64 / 60f64;
         println!("{kind:?}'s balance: {hours:.2}h");
         Ok(())
@@ -194,29 +160,4 @@ impl WorktimeCommand {
             Err(_) => Err("Doesn't seem like you got sqlite3 installed or in $PATH".into()),
         }
     }
-
-    fn prompt_report_with_kind() -> WorktimeCommand {
-        let selection = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("What report do you want, bruv?")
-            .default(0)
-            .items(
-                ReportKind::iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice(),
-            )
-            .interact()
-            .expect("Can't print choices");
-
-        let kind = *ReportKind::iter()
-            .collect::<Vec<ReportKind>>()
-            .get(selection)
-            .unwrap();
-
-        WorktimeCommand::Report { kind }
-    }
-}
-
-fn add_linebrakes() {
-    print!("\n\n");
 }

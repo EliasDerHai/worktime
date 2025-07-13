@@ -1,12 +1,10 @@
-use std::fmt::Display;
-
-use chrono::{Local, NaiveDate, NaiveDateTime};
-use sqlx::{Error, SqlitePool};
-
 use crate::{
     err::CommandResult,
-    time::{get_now, get_utc_zero},
+    time::{Clock, get_utc_zero},
 };
+use chrono::{Local, NaiveDate, NaiveDateTime};
+use sqlx::{Error, SqlitePool};
+use std::fmt::Display;
 
 type Result<T> = sqlx::Result<T>;
 
@@ -45,10 +43,11 @@ pub struct WorktimeDatabase {
 }
 
 impl WorktimeDatabase {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: SqlitePool, clock: &impl Clock) -> Self {
         let p2: SqlitePool = pool.clone();
-        tokio::spawn(async {
-            let _ = sanity_check(p2).await;
+        let now = clock.get_now();
+        tokio::spawn(async move {
+            let _ = sanity_check(p2, now).await;
         });
         Self { pool }
     }
@@ -135,7 +134,7 @@ impl WorktimeDatabase {
     }
 }
 
-async fn sanity_check(pool: SqlitePool) -> Result<()> {
+async fn sanity_check(pool: SqlitePool, now: NaiveDateTime) -> Result<()> {
     let open_sessions = sqlx::query!(
         "
         SELECT count(*) as open_sessions
@@ -169,7 +168,7 @@ async fn sanity_check(pool: SqlitePool) -> Result<()> {
     all_sessions.into_iter().fold(
         get_utc_zero(),
         |last_end, WorktimeSession { id, start, end }| {
-            let end = end.unwrap_or(get_now());
+            let end = end.unwrap_or(now);
 
             assert!(
                 end > start,
