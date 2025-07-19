@@ -1,11 +1,11 @@
 use crate::{
-    DB_PATH,
+    DB_FILE_PATH,
     db::{WorktimeDatabase, WorktimeSession},
     err::CommandResult,
     time::*,
 };
 use clap::{Parser, Subcommand};
-use std::process::Command;
+use std::{ops::Deref, process::Command};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
 #[derive(Parser)]
@@ -152,7 +152,7 @@ impl WorktimeCommand {
     }
 
     fn sqlite(&self) -> CommandResult {
-        match Command::new("sqlite3").arg(DB_PATH).spawn() {
+        match Command::new("sqlite3").arg(DB_FILE_PATH.deref()).spawn() {
             Ok(mut child) => match child.wait() {
                 Ok(_) => Ok(()),
                 Err(_) => Err("Failed to wait on sqlite3".into()),
