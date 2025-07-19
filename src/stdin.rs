@@ -55,9 +55,7 @@ impl StdIn for RealStdIn {
                 add_linebrakes();
                 self.prompt()
             }
-            ExtendedCommand::Quit => {
-                std::process::exit(0);
-            }
+            ExtendedCommand::Quit => WorktimeCommand::Quit,
         }
     }
 
@@ -89,4 +87,45 @@ pub fn get_std_in() -> impl StdIn {
 
 pub fn add_linebrakes() {
     print!("\n\n");
+}
+
+//##########################################################
+// Mock stdin
+//##########################################################
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::*;
+    use std::{cell::RefCell, vec::IntoIter};
+
+    pub struct MockStdIn {
+        pub commands: RefCell<IntoIter<WorktimeCommand>>,
+    }
+
+    impl MockStdIn {
+        pub(crate) fn new(vec: Vec<WorktimeCommand>) -> Self {
+            Self {
+                commands: RefCell::new(vec.into_iter()),
+            }
+        }
+    }
+
+    impl StdIn for MockStdIn {
+        fn parse(&self) -> Option<WorktimeCommand> {
+            self.commands.borrow_mut().next()
+        }
+
+        fn prompt(&self) -> WorktimeCommand {
+            self.commands
+                .borrow_mut()
+                .next()
+                .unwrap_or(WorktimeCommand::Quit)
+        }
+
+        fn prompt_report_with_kind(&self) -> WorktimeCommand {
+            self.commands
+                .borrow_mut()
+                .next()
+                .unwrap_or(WorktimeCommand::Quit)
+        }
+    }
 }

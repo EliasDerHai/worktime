@@ -71,13 +71,26 @@ pub fn display_time(
 // Mock clock
 //##########################################################
 #[cfg(test)]
-pub struct MockClock {
-    pub mock_time: NaiveDateTime,
-}
+pub(crate) mod test_utils {
+    use super::*;
 
-#[cfg(test)]
-impl Clock for MockClock {
-    fn get_now(&self) -> NaiveDateTime {
-        self.mock_time
+    #[derive(Debug, Default)]
+    pub struct MockClock {
+        pub mock_time: NaiveDateTime,
+    }
+
+    impl Clock for MockClock {
+        fn get_now(&self) -> NaiveDateTime {
+            self.mock_time
+        }
+    }
+
+    impl MockClock {
+        pub fn set(&mut self, d: u32, h: u32, m: u32) {
+            self.mock_time = NaiveDate::from_ymd_opt(2025, 7, d)
+                .unwrap()
+                .and_hms_opt(h, m, 0)
+                .unwrap();
+        }
     }
 }

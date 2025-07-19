@@ -185,3 +185,44 @@ async fn sanity_check(pool: SqlitePool, now: NaiveDateTime) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+pub async fn get_test_worktime_db(clock: &impl Clock) -> Result<WorktimeDatabase> {
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    let opts = SqliteConnectOptions::new().in_memory(true);
+    let pool = SqlitePoolOptions::new()
+        // NOTE:
+        // every in-memory db connection is it's own isolated 'database'
+        // see: https://www.sqlite.org/inmemorydb.html
+        // this means that in order to have the migrations available for the whole pool
+        // we have to limit the connections to 1. Any other connection wouldn't have the
+        // migrations!
+        // see: https://github.com/launchbadge/sqlx/issues/362#issuecomment-636661146
+        .max_connections(1)
+        .connect_with(opts)
+        .await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
+    Ok(WorktimeDatabase::new(pool, clock))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::time::test_utils::MockClock;
+
+    #[tokio::test]
+    async fn test_dbs_should_be_isolated() -> Result<()> {
+        let clock = MockClock::default();
+        let db1 = get_test_worktime_db(&clock).await?;
+        let db2 = get_test_worktime_db(&clock).await?;
+
+        db1.insert_start().await.unwrap();
+        let last_1 = db1.get_last_session().await?;
+        let last_2 = db2.get_last_session().await?;
+
+        assert!(last_1.is_some());
+        assert!(last_2.is_none());
+        Ok(())
+    }
+}

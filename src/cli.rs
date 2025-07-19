@@ -32,6 +32,8 @@ pub enum WorktimeCommand {
     },
     /// Sqlite3
     Sql,
+    /// Exit program
+    Quit,
 }
 
 #[derive(Debug, EnumIter, Display, Clone, Copy)]
@@ -48,7 +50,7 @@ pub enum ExtendedCommand {
     Sql,
     /// Print Clap's help
     Help,
-    /// Do nothing
+    /// Exit program
     Quit,
 }
 
@@ -80,6 +82,7 @@ impl WorktimeCommand {
             WorktimeCommand::Stop => self.stop(db).await,
             WorktimeCommand::Report { kind } => self.report(db, *kind, clock).await,
             WorktimeCommand::Sql => self.sqlite(),
+            WorktimeCommand::Quit => Ok(()),
         };
         if let Err(e) = r {
             match e {

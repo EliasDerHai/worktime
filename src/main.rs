@@ -32,15 +32,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let clock = get_clock();
     let db = WorktimeDatabase::new(pool, &clock);
     let std_in = get_std_in();
-    run(&clock, &db, &std_in).await;
+    run_loop(&clock, &db, &std_in).await;
     Ok(())
 }
 
-async fn run(clock: &impl Clock, db: &WorktimeDatabase, std_in: &impl StdIn) {
+async fn run_loop(clock: &impl Clock, db: &WorktimeDatabase, std_in: &impl StdIn) {
     let mut command = std_in.parse().unwrap_or(WorktimeCommand::Status);
-    loop {
+    while !matches!(command, WorktimeCommand::Quit) {
         command.execute(db, clock).await;
         add_linebrakes();
         command = std_in.prompt();
+    }
+    println!("See ya, bruv");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        db::get_test_worktime_db, stdin::test_utils::MockStdIn, time::test_utils::MockClock,
+    };
+
+    #[tokio::test]
+    async fn test() {
+        let mut clock = MockClock::default();
+        clock.set(15, 8, 00);
+        let std_in = MockStdIn::new(vec![WorktimeCommand::Status]);
+        let db = get_test_worktime_db(&clock).await.unwrap();
+
+        run_loop(&clock, &db, &std_in).await;
     }
 }
