@@ -1,9 +1,9 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
-pub type CommandResult<T = ()> = std::result::Result<T, CommandError>;
-#[derive(Debug)]
+pub type CommandResult<T = String> = std::result::Result<T, CommandError>;
+#[derive(Debug, Clone)]
 pub enum CommandError {
-    DatabaseError(sqlx::Error),
+    DatabaseError(Arc<sqlx::Error>), // ← now Clone
     /// Non critical; String is reason
     Other(String),
 }
@@ -23,9 +23,21 @@ impl std::error::Error for CommandError {
     }
 }
 
+impl PartialEq for CommandError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::DatabaseError(l0), Self::DatabaseError(r0)) => {
+                format!("{l0:?}") == format!("{r0:?}") // good enough? 
+            }
+            (Self::Other(l0), Self::Other(r0)) => l0 == r0,
+            _ => false,
+        }
+    }
+}
+
 impl From<sqlx::Error> for CommandError {
     fn from(e: sqlx::Error) -> Self {
-        CommandError::DatabaseError(e)
+        CommandError::DatabaseError(Arc::new(e))
     }
 }
 

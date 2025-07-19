@@ -1,7 +1,7 @@
 use crate::{
     DB_FILE_PATH,
     db::{WorktimeDatabase, WorktimeSession},
-    err::CommandResult,
+    err::{CommandError, CommandResult},
     time::*,
 };
 use clap::{Parser, Subcommand};
@@ -75,24 +75,14 @@ impl ReportKind {
 }
 
 impl WorktimeCommand {
-    pub async fn execute(&self, db: &WorktimeDatabase, clock: &impl Clock) {
-        let r = match self {
+    pub async fn execute(&self, db: &WorktimeDatabase, clock: &impl Clock) -> CommandResult {
+        match self {
             WorktimeCommand::Status => self.status(db).await,
             WorktimeCommand::Start => self.start(db).await,
             WorktimeCommand::Stop => self.stop(db).await,
             WorktimeCommand::Report { kind } => self.report(db, *kind, clock).await,
             WorktimeCommand::Sql => self.sqlite(),
-            WorktimeCommand::Quit => Ok(()),
-        };
-        if let Err(e) = r {
-            match e {
-                crate::err::CommandError::DatabaseError(error) => {
-                    eprintln!("{self:?} failed with: {error}");
-                }
-                crate::err::CommandError::Other(reason) => {
-                    eprintln!("{self:?} skipped due to: {reason}");
-                }
-            };
+            WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
         }
     }
 
@@ -102,21 +92,20 @@ impl WorktimeCommand {
                 id: _,
                 start: _,
                 end: Some(_),
-            }) => println!("Not running"),
+            }) => Ok("Not running".to_string()),
             Some(WorktimeSession {
                 id: _,
                 start,
                 end: None,
-            }) => println!("Running since {start}"),
-            None => eprintln!("No previous sessions"),
-        };
-        Ok(())
+            }) => Ok(format!("Running since {start}")),
+            None => Err(CommandError::Other("No previous sessions".to_string())),
+        }
     }
 
     async fn start(&self, db: &WorktimeDatabase) -> CommandResult {
         db.insert_start()
             .await
-            .map(|time| println!("Start at {}", display_time(&time)))
+            .map(|time| format!("Start at {}", display_time(&time)))
     }
 
     async fn stop(&self, db: &WorktimeDatabase) -> CommandResult {
@@ -132,7 +121,7 @@ impl WorktimeCommand {
 
         db.insert_stop(last.id)
             .await
-            .map(|time| println!("Stop at {}", display_time(&time)))
+            .map(|time| format!("Stop at {}", display_time(&time)))
             .map_err(|e| e.into())
     }
 
@@ -150,14 +139,13 @@ impl WorktimeCommand {
         let sessions = db.get_sessions_since(ref_day).await?;
         let delta = aggregate_session_times(&sessions, clock.get_now());
         let hours = delta.num_minutes() as f64 / 60f64;
-        println!("{kind:?}'s balance: {hours:.2}h");
-        Ok(())
+        Ok(format!("{kind:?}'s balance: {hours:.2}h"))
     }
 
     fn sqlite(&self) -> CommandResult {
         match Command::new("sqlite3").arg(DB_FILE_PATH.deref()).spawn() {
             Ok(mut child) => match child.wait() {
-                Ok(_) => Ok(()),
+                Ok(_) => Ok(String::default()),
                 Err(_) => Err("Failed to wait on sqlite3".into()),
             },
             Err(_) => Err("Doesn't seem like you got sqlite3 installed or in $PATH".into()),

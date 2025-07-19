@@ -1,8 +1,12 @@
-use crate::cli::{Cli, ExtendedCommand, ReportKind, WorktimeCommand};
+use crate::{
+    cli::{Cli, ExtendedCommand, ReportKind, WorktimeCommand},
+    stdout::add_linebrakes,
+};
 use clap::{CommandFactory, Parser};
 use dialoguer::{Select, theme::ColorfulTheme};
 use std::env;
 
+/// proxy for all stdin interaction for testability
 pub trait StdIn {
     fn parse(&self) -> Option<WorktimeCommand>;
     fn prompt(&self) -> WorktimeCommand;
@@ -83,10 +87,6 @@ impl StdIn for RealStdIn {
 
 pub fn get_std_in() -> impl StdIn {
     RealStdIn {}
-}
-
-pub fn add_linebrakes() {
-    print!("\n\n");
 }
 
 //##########################################################
