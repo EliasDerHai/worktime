@@ -2,7 +2,7 @@ use crate::{
     err::CommandResult,
     time::{Clock, get_utc_zero},
 };
-use chrono::{Local, NaiveDate, NaiveDateTime};
+use chrono::{NaiveDate, NaiveDateTime};
 use sqlx::{Error, SqlitePool};
 use std::fmt::Display;
 
@@ -38,18 +38,19 @@ impl From<(i64, NaiveDateTime, Option<NaiveDateTime>)> for WorktimeSession {
     }
 }
 
-pub struct WorktimeDatabase {
+pub struct WorktimeDatabase<'clock> {
     pool: SqlitePool,
+    clock: &'clock dyn Clock,
 }
 
-impl WorktimeDatabase {
-    pub fn new(pool: SqlitePool, clock: &impl Clock) -> Self {
+impl<'clock> WorktimeDatabase<'clock> {
+    pub fn new(pool: SqlitePool, clock: &'clock impl Clock) -> Self {
         let p2: SqlitePool = pool.clone();
         let now = clock.get_now();
         tokio::spawn(async move {
             let _ = sanity_check(p2, now).await;
         });
-        Self { pool }
+        Self { pool, clock }
     }
 
     pub async fn get_last_session(&self) -> Result<Option<WorktimeSession>> {
@@ -106,7 +107,7 @@ impl WorktimeDatabase {
             n => panic!("Corrupt data - {n} sessions running!"),
         }
 
-        let now = Local::now().naive_local();
+        let now = self.clock.get_now();
         sqlx::query!("INSERT INTO work_sessions (start_time) VALUES ($1)", now)
             .execute(&self.pool)
             .await?;
@@ -114,7 +115,7 @@ impl WorktimeDatabase {
     }
 
     pub async fn insert_stop(&self, id: WorktimeSessionId) -> Result<NaiveDateTime> {
-        let now = Local::now().naive_local();
+        let now = self.clock.get_now();
         let updated = sqlx::query!(
             r#"
             UPDATE work_sessions
@@ -171,11 +172,11 @@ async fn sanity_check(pool: SqlitePool, now: NaiveDateTime) -> Result<()> {
             let end = end.unwrap_or(now);
 
             assert!(
-                end > start,
+                end >= start,
                 "Corrupt data - Session '{id}' end {end:?} before start {start:?}"
             );
             assert!(
-                start > last_end,
+                start >= last_end,
                 "Corrupt data - Session '{id}' overlap prev. end {end:?} after next start {start:?}"
             );
 

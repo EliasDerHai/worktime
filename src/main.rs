@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn run_loop(
     clock: &impl Clock,
-    db: &WorktimeDatabase,
+    db: &WorktimeDatabase<'_>,
     std_in: &impl StdIn,
     std_out: &mut impl StdOut,
 ) {
@@ -57,24 +57,33 @@ async fn run_loop(
 mod tests {
     use super::*;
     use crate::{
-        db::get_test_worktime_db, err::CommandError, stdin::test_utils::MockStdIn,
+        cli::ReportKind, db::get_test_worktime_db, stdin::test_utils::MockStdIn,
         stdout::test_utils::StdOutRecorder, time::test_utils::MockClock,
     };
 
     #[tokio::test]
-    async fn test() {
+    async fn should_record_workday() {
         let clock = MockClock::default();
+        clock.set(1, 9, 00);
+
         let db = get_test_worktime_db(&clock).await.unwrap();
-        let std_in = MockStdIn::new(vec![WorktimeCommand::Status]);
         let mut std_out = StdOutRecorder::default();
 
+        let std_in = MockStdIn::new(vec![WorktimeCommand::Start]);
         run_loop(&clock, &db, &std_in, &mut std_out).await;
 
-        // clock.set(15, 8, 00);
-        //let actual = std_out.results.first().unwrap().clone().unwrap_err();
+        let std_in = MockStdIn::new(vec![
+            WorktimeCommand::Stop,
+            WorktimeCommand::Report {
+                kind: ReportKind::Day,
+            },
+        ]);
+        clock.set(1, 15, 00);
+        run_loop(&clock, &db, &std_in, &mut std_out).await;
+
         assert_eq!(
-            std_out.results,
-            vec![Err(CommandError::Other("No previous sessions".to_string()))]
+            std_out.results.last().unwrap().clone().unwrap().as_str(),
+            "Day's balance: 6.00h"
         );
     }
 }

@@ -72,22 +72,24 @@ pub fn display_time(
 //##########################################################
 #[cfg(test)]
 pub(crate) mod test_utils {
+    use std::cell::RefCell;
+
     use super::*;
 
     #[derive(Debug, Default)]
     pub struct MockClock {
-        pub mock_time: NaiveDateTime,
+        pub mock_time: RefCell<NaiveDateTime>,
     }
 
     impl Clock for MockClock {
         fn get_now(&self) -> NaiveDateTime {
-            self.mock_time
+            *self.mock_time.borrow()
         }
     }
 
     impl MockClock {
-        pub fn set(&mut self, d: u32, h: u32, m: u32) {
-            self.mock_time = NaiveDate::from_ymd_opt(2025, 7, d)
+        pub fn set(&self, d: u32, h: u32, m: u32) {
+            *self.mock_time.borrow_mut() = NaiveDate::from_ymd_opt(2025, 7, d)
                 .unwrap()
                 .and_hms_opt(h, m, 0)
                 .unwrap();

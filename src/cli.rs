@@ -75,7 +75,7 @@ impl ReportKind {
 }
 
 impl WorktimeCommand {
-    pub async fn execute(&self, db: &WorktimeDatabase, clock: &impl Clock) -> CommandResult {
+    pub async fn execute(&self, db: &WorktimeDatabase<'_>, clock: &impl Clock) -> CommandResult {
         match self {
             WorktimeCommand::Status => self.status(db).await,
             WorktimeCommand::Start => self.start(db).await,
@@ -86,7 +86,7 @@ impl WorktimeCommand {
         }
     }
 
-    async fn status(&self, db: &WorktimeDatabase) -> CommandResult {
+    async fn status(&self, db: &WorktimeDatabase<'_>) -> CommandResult {
         match db.get_last_session().await? {
             Some(WorktimeSession {
                 id: _,
@@ -102,13 +102,13 @@ impl WorktimeCommand {
         }
     }
 
-    async fn start(&self, db: &WorktimeDatabase) -> CommandResult {
+    async fn start(&self, db: &WorktimeDatabase<'_>) -> CommandResult {
         db.insert_start()
             .await
             .map(|time| format!("Start at {}", display_time(&time)))
     }
 
-    async fn stop(&self, db: &WorktimeDatabase) -> CommandResult {
+    async fn stop(&self, db: &WorktimeDatabase<'_>) -> CommandResult {
         let last = db.get_last_session().await?;
 
         if last.is_none() {
@@ -127,7 +127,7 @@ impl WorktimeCommand {
 
     async fn report(
         &self,
-        db: &WorktimeDatabase,
+        db: &WorktimeDatabase<'_>,
         kind: ReportKind,
         clock: &impl Clock,
     ) -> CommandResult {
