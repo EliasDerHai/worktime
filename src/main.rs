@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     MIGRATOR.run(&pool).await?;
 
     let clock = get_clock();
-    let db = WorktimeDatabase::new(pool, &clock);
+    let db = WorktimeDatabase::new(pool);
     let std_in = get_std_in();
     let mut std_out = get_std_out();
     run_loop(&clock, &db, &std_in, &mut std_out).await;
@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn run_loop(
     clock: &impl Clock,
-    db: &WorktimeDatabase<'_>,
+    db: &WorktimeDatabase,
     std_in: &impl StdIn,
     std_out: &mut impl StdOut,
 ) {
@@ -61,29 +61,63 @@ mod tests {
         stdout::test_utils::StdOutRecorder, time::test_utils::MockClock,
     };
 
+    async fn setup() -> (MockClock, StdOutRecorder, WorktimeDatabase) {
+        let clock = MockClock::default();
+        let db = get_test_worktime_db().await.unwrap();
+        (clock, StdOutRecorder::default(), db)
+    }
+
     #[tokio::test]
     async fn should_record_workday() {
-        let clock = MockClock::default();
+        let (clock, mut recorder, db) = setup().await;
+
+        let std_in: MockStdIn = vec![WorktimeCommand::Start].into();
         clock.set(1, 9, 00);
+        run_loop(&clock, &db, &std_in, &mut recorder).await;
 
-        let db = get_test_worktime_db(&clock).await.unwrap();
-        let mut std_out = StdOutRecorder::default();
-
-        let std_in = MockStdIn::new(vec![WorktimeCommand::Start]);
-        run_loop(&clock, &db, &std_in, &mut std_out).await;
-
-        let std_in = MockStdIn::new(vec![
+        let std_in: MockStdIn = vec![
             WorktimeCommand::Stop,
             WorktimeCommand::Report {
                 kind: ReportKind::Day,
             },
-        ]);
+        ]
+        .into();
         clock.set(1, 15, 00);
-        run_loop(&clock, &db, &std_in, &mut std_out).await;
+        run_loop(&clock, &db, &std_in, &mut recorder).await;
 
-        assert_eq!(
-            std_out.results.last().unwrap().clone().unwrap().as_str(),
-            "Day's balance: 6.00h"
+        let last_out = recorder.results.last().unwrap().clone().unwrap();
+
+        assert_ends_with(last_out.as_str(), "6.00h");
+    }
+
+    #[tokio::test]
+    async fn should_record_workweek() {
+        let (clock, mut recorder, db) = setup().await;
+
+        for day_offset in 0..5 {
+            clock.set(7 + day_offset, 9, 00); // 7 = Monday
+            let std_in: MockStdIn = vec![WorktimeCommand::Start].into();
+            run_loop(&clock, &db, &std_in, &mut recorder).await;
+
+            let std_in: MockStdIn = vec![WorktimeCommand::Stop].into();
+            clock.set(7 + day_offset, 17, 00); // 7 = Monday
+            run_loop(&clock, &db, &std_in, &mut recorder).await;
+        }
+
+        let std_in: MockStdIn = vec![WorktimeCommand::Report {
+            kind: ReportKind::Week,
+        }]
+        .into();
+        run_loop(&clock, &db, &std_in, &mut recorder).await;
+        let last_out = recorder.results.last().unwrap().clone().unwrap();
+
+        assert_ends_with(last_out.as_str(), "40.00h");
+    }
+
+    fn assert_ends_with(actual: &str, expected_end: &str) {
+        assert!(
+            actual.ends_with(expected_end),
+            "expected '{actual}' to end with '{expected_end}'"
         );
     }
 }

@@ -128,4 +128,10 @@ pub(crate) mod test_utils {
                 .unwrap_or(WorktimeCommand::Quit)
         }
     }
+
+    impl From<Vec<WorktimeCommand>> for MockStdIn {
+        fn from(value: Vec<WorktimeCommand>) -> Self {
+            Self::new(value)
+        }
+    }
 }

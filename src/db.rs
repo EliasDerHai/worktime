@@ -1,6 +1,6 @@
 use crate::{
     err::CommandResult,
-    time::{Clock, get_utc_zero},
+    time::Clock,
 };
 use chrono::{NaiveDate, NaiveDateTime};
 use sqlx::{Error, SqlitePool};
@@ -38,19 +38,17 @@ impl From<(i64, NaiveDateTime, Option<NaiveDateTime>)> for WorktimeSession {
     }
 }
 
-pub struct WorktimeDatabase<'clock> {
+pub struct WorktimeDatabase {
     pool: SqlitePool,
-    clock: &'clock dyn Clock,
 }
 
-impl<'clock> WorktimeDatabase<'clock> {
-    pub fn new(pool: SqlitePool, clock: &'clock impl Clock) -> Self {
+impl WorktimeDatabase {
+    pub fn new(pool: SqlitePool) -> Self {
         let p2: SqlitePool = pool.clone();
-        let now = clock.get_now();
         tokio::spawn(async move {
-            let _ = sanity_check(p2, now).await;
+            let _ = sanity_check(p2).await;
         });
-        Self { pool, clock }
+        Self { pool }
     }
 
     pub async fn get_last_session(&self) -> Result<Option<WorktimeSession>> {
@@ -89,7 +87,7 @@ impl<'clock> WorktimeDatabase<'clock> {
         })
     }
 
-    pub async fn insert_start(&self) -> CommandResult<NaiveDateTime> {
+    pub async fn insert_start(&self, clock: &impl Clock) -> CommandResult<NaiveDateTime> {
         let c = sqlx::query!(
             "
         SELECT count(*) as open_sessions
@@ -107,15 +105,19 @@ impl<'clock> WorktimeDatabase<'clock> {
             n => panic!("Corrupt data - {n} sessions running!"),
         }
 
-        let now = self.clock.get_now();
+        let now = clock.get_now();
         sqlx::query!("INSERT INTO work_sessions (start_time) VALUES ($1)", now)
             .execute(&self.pool)
             .await?;
         Ok(now)
     }
 
-    pub async fn insert_stop(&self, id: WorktimeSessionId) -> Result<NaiveDateTime> {
-        let now = self.clock.get_now();
+    pub async fn insert_stop(
+        &self,
+        id: WorktimeSessionId,
+        clock: &impl Clock,
+    ) -> Result<NaiveDateTime> {
+        let now = clock.get_now();
         let updated = sqlx::query!(
             r#"
             UPDATE work_sessions
@@ -135,7 +137,7 @@ impl<'clock> WorktimeDatabase<'clock> {
     }
 }
 
-async fn sanity_check(pool: SqlitePool, now: NaiveDateTime) -> Result<()> {
+async fn sanity_check(pool: SqlitePool) -> Result<()> {
     let open_sessions = sqlx::query!(
         "
         SELECT count(*) as open_sessions
@@ -167,18 +169,20 @@ async fn sanity_check(pool: SqlitePool, now: NaiveDateTime) -> Result<()> {
     };
 
     all_sessions.into_iter().fold(
-        get_utc_zero(),
+        None,
         |last_end, WorktimeSession { id, start, end }| {
-            let end = end.unwrap_or(now);
-
-            assert!(
+            if let Some(end) = end{ 
+                assert!(
                 end >= start,
                 "Corrupt data - Session '{id}' end {end:?} before start {start:?}"
             );
+            }
+            if let Some(last_end) = last_end{
             assert!(
                 start >= last_end,
-                "Corrupt data - Session '{id}' overlap prev. end {end:?} after next start {start:?}"
+                "Corrupt data - Session '{id}' overlap prev. end {last_end:?} after next start {start:?}"
             );
+            }
 
             end
         },
@@ -188,7 +192,7 @@ async fn sanity_check(pool: SqlitePool, now: NaiveDateTime) -> Result<()> {
 }
 
 #[cfg(test)]
-pub async fn get_test_worktime_db(clock: &impl Clock) -> Result<WorktimeDatabase> {
+pub async fn get_test_worktime_db() -> Result<WorktimeDatabase> {
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
     let opts = SqliteConnectOptions::new().in_memory(true);
@@ -204,7 +208,7 @@ pub async fn get_test_worktime_db(clock: &impl Clock) -> Result<WorktimeDatabase
         .connect_with(opts)
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
-    Ok(WorktimeDatabase::new(pool, clock))
+    Ok(WorktimeDatabase::new(pool))
 }
 
 #[cfg(test)]
@@ -215,10 +219,10 @@ mod tests {
     #[tokio::test]
     async fn test_dbs_should_be_isolated() -> Result<()> {
         let clock = MockClock::default();
-        let db1 = get_test_worktime_db(&clock).await?;
-        let db2 = get_test_worktime_db(&clock).await?;
+        let db1 = get_test_worktime_db().await?;
+        let db2 = get_test_worktime_db().await?;
 
-        db1.insert_start().await.unwrap();
+        db1.insert_start(&clock).await.unwrap();
         let last_1 = db1.get_last_session().await?;
         let last_2 = db2.get_last_session().await?;
 

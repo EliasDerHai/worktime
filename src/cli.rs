@@ -75,18 +75,18 @@ impl ReportKind {
 }
 
 impl WorktimeCommand {
-    pub async fn execute(&self, db: &WorktimeDatabase<'_>, clock: &impl Clock) -> CommandResult {
+    pub async fn execute(&self, db: &WorktimeDatabase, clock: &impl Clock) -> CommandResult {
         match self {
             WorktimeCommand::Status => self.status(db).await,
-            WorktimeCommand::Start => self.start(db).await,
-            WorktimeCommand::Stop => self.stop(db).await,
+            WorktimeCommand::Start => self.start(db, clock).await,
+            WorktimeCommand::Stop => self.stop(db, clock).await,
             WorktimeCommand::Report { kind } => self.report(db, *kind, clock).await,
             WorktimeCommand::Sql => self.sqlite(),
             WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
         }
     }
 
-    async fn status(&self, db: &WorktimeDatabase<'_>) -> CommandResult {
+    async fn status(&self, db: &WorktimeDatabase) -> CommandResult {
         match db.get_last_session().await? {
             Some(WorktimeSession {
                 id: _,
@@ -102,13 +102,13 @@ impl WorktimeCommand {
         }
     }
 
-    async fn start(&self, db: &WorktimeDatabase<'_>) -> CommandResult {
-        db.insert_start()
+    async fn start(&self, db: &WorktimeDatabase, clock: &impl Clock) -> CommandResult {
+        db.insert_start(clock)
             .await
             .map(|time| format!("Start at {}", display_time(&time)))
     }
 
-    async fn stop(&self, db: &WorktimeDatabase<'_>) -> CommandResult {
+    async fn stop(&self, db: &WorktimeDatabase, clock: &impl Clock) -> CommandResult {
         let last = db.get_last_session().await?;
 
         if last.is_none() {
@@ -119,7 +119,7 @@ impl WorktimeCommand {
             return Err("No session started".into());
         }
 
-        db.insert_stop(last.id)
+        db.insert_stop(last.id, clock)
             .await
             .map(|time| format!("Stop at {}", display_time(&time)))
             .map_err(|e| e.into())
@@ -127,7 +127,7 @@ impl WorktimeCommand {
 
     async fn report(
         &self,
-        db: &WorktimeDatabase<'_>,
+        db: &WorktimeDatabase,
         kind: ReportKind,
         clock: &impl Clock,
     ) -> CommandResult {

@@ -1,5 +1,5 @@
 use crate::db::WorktimeSession;
-use chrono::{DateTime, Datelike, Days, Local, NaiveDate, NaiveDateTime, TimeDelta, Weekday};
+use chrono::{Datelike, Days, Local, NaiveDate, NaiveDateTime, TimeDelta, Weekday};
 
 //##########################################################
 // Clock
@@ -46,10 +46,6 @@ pub fn get_month_start(clock: &impl Clock) -> NaiveDate {
 //##########################################################
 // Other utilities (not dependent on NOW)
 //##########################################################
-pub fn get_utc_zero() -> NaiveDateTime {
-    DateTime::from_timestamp_millis(0).unwrap().naive_local()
-}
-
 pub fn aggregate_session_times(sessions: &[WorktimeSession], now: NaiveDateTime) -> TimeDelta {
     sessions.iter().fold(
         TimeDelta::zero(),
@@ -65,6 +61,30 @@ pub fn display_time(
     time: &NaiveDateTime,
 ) -> chrono::format::DelayedFormat<chrono::format::StrftimeItems<'_>> {
     time.format("%H:%M:%S")
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::{test_utils::MockClock, *};
+
+    #[test]
+    fn should_get_week_start_from_wed() {
+        let clock = MockClock::default();
+        clock.set(9, 12, 0); // Wednesday
+        let actual = get_week_start(&clock);
+        let expected = NaiveDate::from_ymd_opt(2025, 7, 7).unwrap();
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn should_get_week_start_from_sun() {
+        let clock = MockClock::default();
+        clock.set(13, 12, 0); // Sunday
+        let actual = get_week_start(&clock);
+        let expected = NaiveDate::from_ymd_opt(2025, 7, 7).unwrap();
+
+        assert_eq!(actual, expected);
+    }
 }
 
 //##########################################################
