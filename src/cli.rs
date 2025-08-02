@@ -30,6 +30,14 @@ pub enum WorktimeCommand {
         #[arg(value_enum, default_value_t = ReportKind::Day)]
         kind: ReportKind,
     },
+    /// Correct QoL
+    Correct {
+        /// The kind of report to generate
+        #[arg(default_value_t = 0)]
+        idx: u8,
+        #[arg(value_enum, default_value_t = CorrectionKind::Start)]
+        kind: CorrectionKind,
+    },
     /// Sqlite3
     Sql,
     /// Exit program
@@ -46,6 +54,12 @@ pub enum ExtendedCommand {
     Stop,
     /// Report today's total work time
     Report { kind: ReportKind },
+    /// Correct QoL
+    Correct {
+        /// The kind of report to generate
+        idx: u8,
+        kind: CorrectionKind,
+    },
     /// Sqlite3
     Sql,
     /// Print Clap's help
@@ -68,6 +82,13 @@ pub enum ReportKind {
     Month,
 }
 
+#[derive(Default, Debug, Clone, Copy, clap::ValueEnum, EnumIter, Display)]
+pub enum CorrectionKind {
+    #[default]
+    Start,
+    End,
+}
+
 impl ReportKind {
     pub fn wrapped_iter() -> ReportKindIter {
         ReportKind::iter()
@@ -81,6 +102,7 @@ impl WorktimeCommand {
             WorktimeCommand::Start => self.start(db, clock).await,
             WorktimeCommand::Stop => self.stop(db, clock).await,
             WorktimeCommand::Report { kind } => self.report(db, *kind, clock).await,
+            WorktimeCommand::Correct { idx, kind } => todo!(),
             WorktimeCommand::Sql => self.sqlite(),
             WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
         }

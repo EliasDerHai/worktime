@@ -60,6 +60,7 @@ impl StdIn for RealStdIn {
                 self.prompt()
             }
             ExtendedCommand::Quit => WorktimeCommand::Quit,
+            ExtendedCommand::Correct { idx, kind } => WorktimeCommand::Correct { idx, kind },
         }
     }
 
