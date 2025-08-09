@@ -1,16 +1,17 @@
 use crate::{
-    cli::{Cli, ExtendedCommand, ReportKind, WorktimeCommand},
-    stdout::add_linebrakes,
+    cli::{Cli, MainMenuCommand, ReportKind, WorktimeCommand},
+    db::WorktimeDatabase,
 };
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use dialoguer::{Select, theme::ColorfulTheme};
 use std::env;
 
 /// proxy for all stdin interaction for testability
 pub trait StdIn {
     fn parse(&self) -> Option<WorktimeCommand>;
-    fn prompt(&self) -> WorktimeCommand;
-    fn prompt_report_with_kind(&self) -> WorktimeCommand;
+    async fn prompt(&self, db: &WorktimeDatabase) -> WorktimeCommand;
+    async fn prompt_report(&self) -> WorktimeCommand;
+    async fn prompt_correct(&self, db: &WorktimeDatabase) -> WorktimeCommand;
 }
 
 struct RealStdIn {}
@@ -28,12 +29,12 @@ impl StdIn for RealStdIn {
         }
     }
 
-    fn prompt(&self) -> WorktimeCommand {
+    async fn prompt(&self, db: &WorktimeDatabase) -> WorktimeCommand {
         let selection = Select::with_theme(&ColorfulTheme::default())
             .with_prompt("What you want, bruv?")
             .default(0)
             .items(
-                ExtendedCommand::wrapped_iter()
+                MainMenuCommand::wrapped_iter()
                     .map(|c| c.to_string())
                     .collect::<Vec<String>>()
                     .as_slice(),
@@ -41,32 +42,53 @@ impl StdIn for RealStdIn {
             .interact()
             .expect("Can't print select prompt");
 
-        let extended_comm = *ExtendedCommand::wrapped_iter()
-            .collect::<Vec<ExtendedCommand>>()
+        let extended_comm = *MainMenuCommand::wrapped_iter()
+            .collect::<Vec<MainMenuCommand>>()
             .get(selection)
             .unwrap();
 
         match extended_comm {
-            ExtendedCommand::Status => WorktimeCommand::Status,
-            ExtendedCommand::Start => WorktimeCommand::Start,
-            ExtendedCommand::Stop => WorktimeCommand::Stop,
-            ExtendedCommand::Report { kind: _ } => self.prompt_report_with_kind(),
-            ExtendedCommand::Sql => WorktimeCommand::Sql,
-            ExtendedCommand::Help => {
-                <Cli as CommandFactory>::command()
-                    .print_help()
-                    .expect("Can't print help");
-                add_linebrakes();
-                self.prompt()
-            }
-            ExtendedCommand::Quit => WorktimeCommand::Quit,
-            ExtendedCommand::Correct { idx, kind } => WorktimeCommand::Correct { idx, kind },
+            MainMenuCommand::Status => WorktimeCommand::Status,
+            MainMenuCommand::Start => WorktimeCommand::Start,
+            MainMenuCommand::Stop => WorktimeCommand::Stop,
+            MainMenuCommand::Report => self.prompt_report().await,
+            MainMenuCommand::Sql => WorktimeCommand::Sql,
+            MainMenuCommand::Help => WorktimeCommand::InternalHelp,
+            MainMenuCommand::Quit => WorktimeCommand::Quit,
+            MainMenuCommand::Correct => self.prompt_correct(db).await,
         }
     }
 
-    fn prompt_report_with_kind(&self) -> WorktimeCommand {
+    async fn prompt_report(&self) -> WorktimeCommand {
         let selection = Select::with_theme(&ColorfulTheme::default())
             .with_prompt("What report do you want, bruv?")
+            .default(0)
+            .items(
+                ReportKind::wrapped_iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<String>>()
+                    .as_slice(),
+            )
+            .interact()
+            .expect("Can't print choices");
+
+        let kind = *ReportKind::wrapped_iter()
+            .collect::<Vec<ReportKind>>()
+            .get(selection)
+            .unwrap();
+
+        WorktimeCommand::Report { kind }
+    }
+
+    async fn prompt_correct(&self, db: &WorktimeDatabase) -> WorktimeCommand {
+        db.get_last_n_sessions(10)
+            .await
+            .expect("Failed to query previous sessions");
+
+        todo!();
+
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Which entry do you want to correct, bruv?")
             .default(0)
             .items(
                 ReportKind::wrapped_iter()
@@ -115,14 +137,21 @@ pub(crate) mod test_utils {
             self.commands.borrow_mut().next()
         }
 
-        fn prompt(&self) -> WorktimeCommand {
+        async fn prompt(&self, _: &WorktimeDatabase) -> WorktimeCommand {
             self.commands
                 .borrow_mut()
                 .next()
                 .unwrap_or(WorktimeCommand::Quit)
         }
 
-        fn prompt_report_with_kind(&self) -> WorktimeCommand {
+        async fn prompt_report(&self) -> WorktimeCommand {
+            self.commands
+                .borrow_mut()
+                .next()
+                .unwrap_or(WorktimeCommand::Quit)
+        }
+
+        async fn prompt_correct(&self, _: &WorktimeDatabase) -> WorktimeCommand {
             self.commands
                 .borrow_mut()
                 .next()

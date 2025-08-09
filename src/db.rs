@@ -72,6 +72,23 @@ impl WorktimeDatabase {
         }
     }
 
+    pub async fn get_last_n_sessions(&self, n: u32) -> Result<Vec<WorktimeSession>> {
+        let last = sqlx::query!("
+        SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  
+        FROM work_sessions 
+        ORDER BY id desc 
+        LIMIT $1
+    ", n)
+        .fetch_all(&self.pool)
+        .await;
+
+        last.map(|rows| rows.iter().map(|r| WorktimeSession::from((
+                r.id,
+                r.start_time,
+                r.end_time,
+            ))).collect())
+    }
+
     pub async fn get_sessions_since(&self, day: NaiveDate) -> Result<Vec<WorktimeSession>> {
         let r = sqlx::query!("
         SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  

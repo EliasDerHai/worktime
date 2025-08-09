@@ -40,12 +40,23 @@ pub enum WorktimeCommand {
     },
     /// Sqlite3
     Sql,
+    /// Prints Clap's help
+    /// NOTE: can't be named help
+    /// (causes runtime panic due to conflict with clap's help)
+    #[command(hide = true)]
+    InternalHelp,
     /// Exit program
+    #[command(hide = true)]
     Quit,
 }
 
+/// the [`WorktimeCommand`] plus Help & Quit for
+/// listing the Options in the MainMenu
+/// should stay:
+///     - iterable
+///     - 'flat' (no nested state/data -> stdin selection)
 #[derive(Debug, EnumIter, Display, Clone, Copy)]
-pub enum ExtendedCommand {
+pub enum MainMenuCommand {
     /// Prints current state
     Status,
     /// Start tracking time
@@ -53,13 +64,9 @@ pub enum ExtendedCommand {
     /// Stop tracking time
     Stop,
     /// Report today's total work time
-    Report { kind: ReportKind },
+    Report,
     /// Correct QoL
-    Correct {
-        /// The kind of report to generate
-        idx: u8,
-        kind: CorrectionKind,
-    },
+    Correct,
     /// Sqlite3
     Sql,
     /// Print Clap's help
@@ -68,9 +75,9 @@ pub enum ExtendedCommand {
     Quit,
 }
 
-impl ExtendedCommand {
-    pub fn wrapped_iter() -> ExtendedCommandIter {
-        ExtendedCommand::iter()
+impl MainMenuCommand {
+    pub fn wrapped_iter() -> MainMenuCommandIter {
+        MainMenuCommand::iter()
     }
 }
 
@@ -104,6 +111,7 @@ impl WorktimeCommand {
             WorktimeCommand::Report { kind } => self.report(db, *kind, clock).await,
             WorktimeCommand::Correct { idx, kind } => todo!(),
             WorktimeCommand::Sql => self.sqlite(),
+            WorktimeCommand::InternalHelp => self.help(),
             WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
         }
     }
@@ -172,5 +180,10 @@ impl WorktimeCommand {
             },
             Err(_) => Err("Doesn't seem like you got sqlite3 installed or in $PATH".into()),
         }
+    }
+
+    fn help(&self) -> CommandResult {
+        let styled = <Cli as clap::CommandFactory>::command().render_help();
+        Ok(format!("{styled}"))
     }
 }

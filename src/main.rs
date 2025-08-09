@@ -49,7 +49,7 @@ async fn run_loop(
     while !matches!(command, WorktimeCommand::Quit) {
         let result = command.execute(db, clock).await;
         std_out.print(command, result);
-        command = std_in.prompt();
+        command = std_in.prompt(db).await;
     }
 }
 
