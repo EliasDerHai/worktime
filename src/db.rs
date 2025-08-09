@@ -1,6 +1,6 @@
 use crate::{
     err::CommandResult,
-    time::Clock,
+    time::{display_time, Clock},
 };
 use chrono::{NaiveDate, NaiveDateTime};
 use sqlx::{Error, SqlitePool};
@@ -10,6 +10,12 @@ type Result<T> = sqlx::Result<T>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WorktimeSessionId(u32);
+
+impl Into<u32> for WorktimeSessionId {
+    fn into(self) -> u32 {
+        self.0
+    }
+}
 
 impl Display for WorktimeSessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -29,6 +35,16 @@ pub struct WorktimeSession {
     pub id: WorktimeSessionId,
     pub start: NaiveDateTime,
     pub end: Option<NaiveDateTime>,
+}
+
+impl Display for WorktimeSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let id =&self.id;
+        let start = display_time(&self.start);
+        let end = &self.end.map(|t| display_time(&t).to_string())
+            .unwrap_or("-".to_string());
+        write!(f, "id: {id};start: {start};end: {end}")
+    }
 }
 
 impl From<(i64, NaiveDateTime, Option<NaiveDateTime>)> for WorktimeSession {
@@ -53,11 +69,11 @@ impl WorktimeDatabase {
 
     pub async fn get_last_session(&self) -> Result<Option<WorktimeSession>> {
         let last = sqlx::query!("
-        SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  
-        FROM work_sessions 
-        ORDER BY id desc 
-        LIMIT 1
-    ")
+            SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  
+            FROM work_sessions 
+            ORDER BY id desc 
+            LIMIT 1
+        ")
         .fetch_one(&self.pool)
         .await;
 
@@ -74,11 +90,11 @@ impl WorktimeDatabase {
 
     pub async fn get_last_n_sessions(&self, n: u32) -> Result<Vec<WorktimeSession>> {
         let last = sqlx::query!("
-        SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  
-        FROM work_sessions 
-        ORDER BY id desc 
-        LIMIT $1
-    ", n)
+               SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  
+               FROM work_sessions 
+               ORDER BY id desc 
+               LIMIT $1
+           ", n)
         .fetch_all(&self.pool)
         .await;
 
@@ -90,12 +106,15 @@ impl WorktimeDatabase {
     }
 
     pub async fn get_sessions_since(&self, day: NaiveDate) -> Result<Vec<WorktimeSession>> {
-        let r = sqlx::query!("
-        SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  
-        FROM work_sessions 
-        WHERE date(start_time) >= date($1)
-        ORDER BY id asc
-        ", day).fetch_all(&self.pool).await;
+        let r = sqlx::query!(
+            r#"
+                SELECT id, start_time as "start_time: NaiveDateTime", end_time as "end_time: NaiveDateTime"  
+                FROM work_sessions 
+                WHERE date(start_time) >= date($1)
+                ORDER BY id asc
+            "#,
+            day
+        ).fetch_all(&self.pool).await;
 
         r.map(|rows| {
             rows.iter()
@@ -106,11 +125,11 @@ impl WorktimeDatabase {
 
     pub async fn insert_start(&self, clock: &impl Clock) -> CommandResult<NaiveDateTime> {
         let c = sqlx::query!(
-            "
-        SELECT count(*) as open_sessions
-        FROM work_sessions 
-        WHERE end_time IS NULL
-        "
+           r#"
+                SELECT count(*) as open_sessions
+                FROM work_sessions 
+                WHERE end_time IS NULL
+           "#
         )
         .fetch_one(&self.pool)
         .await?
@@ -151,6 +170,25 @@ impl WorktimeDatabase {
         } else {
             Err(Error::RowNotFound)
         }
+    }
+
+    pub async fn get_session_by_id(&self, id: u32) -> WorktimeSession {
+        let r = sqlx::query!(r#"
+                SELECT id, start_time as "start_time: NaiveDateTime", end_time as "end_time: NaiveDateTime"  
+                FROM work_sessions 
+                WHERE id = $1
+            "#, 
+            id)
+            .fetch_one(&self.pool)
+            .await;
+        
+        r.map(|row| {
+            WorktimeSession::from((
+                row.id,
+                row.start_time,
+                row.end_time,
+            ))
+        }).expect(&format!("no work_session with id = '{id}'"))
     }
 }
 

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT count(*) as open_sessions\n                FROM work_sessions \n                WHERE end_time IS NULL\n           ",
+  "describe": {
+    "columns": [
+      {
+        "name": "open_sessions",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bb3f8c89ce2bf26f0cdb9289bfca2d6c1045d5c274a2154ebbc335123f71a858"
+}

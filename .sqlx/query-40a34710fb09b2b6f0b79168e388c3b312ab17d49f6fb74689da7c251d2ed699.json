@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  \n        FROM work_sessions \n        WHERE date(start_time) >= date($1)\n        ORDER BY id asc\n        ",
+  "query": "\n            SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  \n            FROM work_sessions \n            ORDER BY id desc \n            LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       false,
@@ -28,5 +28,5 @@
       true
     ]
   },
-  "hash": "068e7eb763f9b7397a731de62b0470f5ee30db9583e8649a6d95505dd83f9fcb"
+  "hash": "40a34710fb09b2b6f0b79168e388c3b312ab17d49f6fb74689da7c251d2ed699"
 }

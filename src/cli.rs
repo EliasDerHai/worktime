@@ -4,6 +4,7 @@ use crate::{
     err::{CommandError, CommandResult},
     time::*,
 };
+use chrono::NaiveTime;
 use clap::{Parser, Subcommand};
 use std::{ops::Deref, process::Command};
 use strum::{Display, EnumIter, IntoEnumIterator};
@@ -30,13 +31,18 @@ pub enum WorktimeCommand {
         #[arg(value_enum, default_value_t = ReportKind::Day)]
         kind: ReportKind,
     },
-    /// Correct QoL
+    /// Correct QoL - sets start/end of session with id to hours:minutes
     Correct {
-        /// The kind of report to generate
-        #[arg(default_value_t = 0)]
-        idx: u8,
+        /// The id of the row to change (if you're not a database yourself, you should probably do this the
+        /// interactive way...)
+        #[arg()]
+        id: u32,
         #[arg(value_enum, default_value_t = CorrectionKind::Start)]
         kind: CorrectionKind,
+        #[arg()]
+        hours: u8,
+        #[arg()]
+        minutes: u8,
     },
     /// Sqlite3
     Sql,
@@ -109,7 +115,12 @@ impl WorktimeCommand {
             WorktimeCommand::Start => self.start(db, clock).await,
             WorktimeCommand::Stop => self.stop(db, clock).await,
             WorktimeCommand::Report { kind } => self.report(db, *kind, clock).await,
-            WorktimeCommand::Correct { idx, kind } => todo!(),
+            WorktimeCommand::Correct {
+                id,
+                kind,
+                hours,
+                minutes,
+            } => self.correct(db, *id, *kind, *hours, *minutes).await,
             WorktimeCommand::Sql => self.sqlite(),
             WorktimeCommand::InternalHelp => self.help(),
             WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
@@ -185,5 +196,27 @@ impl WorktimeCommand {
     fn help(&self) -> CommandResult {
         let styled = <Cli as clap::CommandFactory>::command().render_help();
         Ok(format!("{styled}"))
+    }
+
+    async fn correct(
+        &self,
+        db: &WorktimeDatabase,
+        id: u32,
+        kind: CorrectionKind,
+        hours: u8,
+        minutes: u8,
+    ) -> Result<String, CommandError> {
+        let s = db.get_session_by_id(id).await;
+
+        let d = s.start.date().and_time(
+            NaiveTime::from_hms_opt(hours as u32, minutes as u32, 0).expect("cannot build time"),
+        );
+
+        let t = match kind {
+            CorrectionKind::Start => todo!(),
+            CorrectionKind::End => todo!(),
+        };
+
+        todo!()
     }
 }

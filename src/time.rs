@@ -60,7 +60,7 @@ pub fn aggregate_session_times(sessions: &[WorktimeSession], now: NaiveDateTime)
 pub fn display_time(
     time: &NaiveDateTime,
 ) -> chrono::format::DelayedFormat<chrono::format::StrftimeItems<'_>> {
-    time.format("%H:%M:%S")
+    time.format("%H:%M")
 }
 
 #[cfg(test)]
