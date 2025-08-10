@@ -2,6 +2,7 @@ use crate::{
     cli::{Cli, CorrectionKind, MainMenuCommand, ReportKind, WorktimeCommand},
     db::WorktimeDatabase,
 };
+use chrono::Timelike;
 use clap::Parser;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
 use std::{env, sync::LazyLock};
@@ -72,37 +73,37 @@ impl StdIn for RealStdIn {
             &[CorrectionKind::Start, CorrectionKind::End],
         );
 
-        let hours_str: String = Input::with_theme(&*THEME)
-            .with_prompt("Hour (HH, 00-23)")
-            .validate_with(|s: &String| -> Result<(), &str> {
-                if s.len() != 2 || !s.chars().all(|c| c.is_ascii_digit()) {
-                    return Err("Enter exactly two digits, e.g., 09");
+        let start_min: u32 = session.start.num_seconds_from_midnight() / 60;
+        let end_min: Option<u32> = session.end.map(|t| t.num_seconds_from_midnight() / 60);
+
+        let time_input: String = Input::with_theme(&*THEME)
+            .with_prompt("Enter the updated time (HH:MM)")
+            .validate_with(|s: &String| -> Result<(), String> {
+                let (h, m) = parse_hhmm(s)?;
+
+                let updated_min = h as u32 * 60 + m as u32;
+
+                match (kind, end_min) {
+                    (CorrectionKind::Start, Some(end_min)) => {
+                        if updated_min > end_min {
+                            return Err("Start can't be after end!".to_string());
+                        }
+                    }
+                    (CorrectionKind::End, _) => {
+                        if updated_min < start_min {
+                            return Err("Start can't be after end!".to_string());
+                        }
+                    }
+                    _ => {}
                 }
-                match s.parse::<u8>() {
-                    Ok(v) if v <= 23 => Ok(()),
-                    _ => Err("Value must be in 00..23"),
-                }
+
+                Ok(())
             })
             .interact_text()
-            .expect("Failed to read hours");
+            .expect("Failed to read input");
 
-        // Exactly two digits for MM in 00..59
-        let minutes_str: String = Input::with_theme(&*THEME)
-            .with_prompt("Minute (MM, 00-59)")
-            .validate_with(|s: &String| -> Result<(), &str> {
-                if s.len() != 2 || !s.chars().all(|c| c.is_ascii_digit()) {
-                    return Err("Enter exactly two digits, e.g., 07");
-                }
-                match s.parse::<u8>() {
-                    Ok(v) if v <= 59 => Ok(()),
-                    _ => Err("Value must be in 00..59"),
-                }
-            })
-            .interact_text()
-            .expect("Failed to read minutes");
-
-        let hours: u8 = hours_str.parse().unwrap();
-        let minutes: u8 = minutes_str.parse().unwrap();
+        let (hours, minutes) =
+            parse_hhmm(&time_input).expect("user-input should be validated already");
 
         WorktimeCommand::Correct {
             id: session.id.into(),
@@ -126,6 +127,25 @@ fn prompt_selection<'item, T: ToString>(prompt: &str, items: &'item [T]) -> &'it
         .interact()
         .expect("Can't print choices");
     items.get(idx).expect("selection can never be out of range")
+}
+
+/// returns (hours, minutes)
+fn parse_hhmm(s: &str) -> Result<(u8, u8), String> {
+    let (h, m) = s
+        .split_once(':')
+        .ok_or_else(|| "Use HH:MM (e.g., 09:30)".to_string())?;
+
+    let h: u8 = h.parse().map_err(|_| "Hours must be 0–23".to_string())?;
+    let m: u8 = m.parse().map_err(|_| "Minutes must be 0–59".to_string())?;
+
+    if h > 23 {
+        return Err("Hours must be 0–23".into());
+    }
+    if m > 59 {
+        return Err("Minutes must be 0–59".into());
+    }
+
+    Ok((h, m))
 }
 
 //##########################################################
