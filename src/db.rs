@@ -1,6 +1,6 @@
 use crate::{
     err::CommandResult,
-    time::{display_time, Clock},
+    time::{Clock, display_time},
 };
 use chrono::{NaiveDate, NaiveDateTime};
 use sqlx::{Error, SqlitePool};
@@ -11,12 +11,6 @@ type Result<T> = sqlx::Result<T>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WorktimeSessionId(u32);
 
-impl Into<u32> for WorktimeSessionId {
-    fn into(self) -> u32 {
-        self.0
-    }
-}
-
 impl Display for WorktimeSessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.0)
@@ -25,8 +19,19 @@ impl Display for WorktimeSessionId {
 
 impl From<i64> for WorktimeSessionId {
     fn from(value: i64) -> Self {
-        let v = u32::try_from(value).unwrap();
-        WorktimeSessionId(v)
+        WorktimeSessionId(u32::try_from(value).unwrap())
+    }
+}
+
+impl From<u32> for WorktimeSessionId {
+    fn from(value: u32) -> Self {
+        WorktimeSessionId(value)
+    }
+}
+
+impl From<WorktimeSessionId> for u32 {
+    fn from(value: WorktimeSessionId) -> Self {
+        value.0
     }
 }
 
@@ -39,9 +44,11 @@ pub struct WorktimeSession {
 
 impl Display for WorktimeSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let id =&self.id;
+        let id = &self.id;
         let start = display_time(&self.start);
-        let end = &self.end.map(|t| display_time(&t).to_string())
+        let end = &self
+            .end
+            .map(|t| display_time(&t).to_string())
             .unwrap_or("-".to_string());
         write!(f, "id: {id};start: {start};end: {end}")
     }
@@ -98,11 +105,11 @@ impl WorktimeDatabase {
         .fetch_all(&self.pool)
         .await;
 
-        last.map(|rows| rows.iter().map(|r| WorktimeSession::from((
-                r.id,
-                r.start_time,
-                r.end_time,
-            ))).collect())
+        last.map(|rows| {
+            rows.iter()
+                .map(|r| WorktimeSession::from((r.id, r.start_time, r.end_time)))
+                .collect()
+        })
     }
 
     pub async fn get_sessions_since(&self, day: NaiveDate) -> Result<Vec<WorktimeSession>> {
@@ -125,7 +132,7 @@ impl WorktimeDatabase {
 
     pub async fn insert_start(&self, clock: &impl Clock) -> CommandResult<NaiveDateTime> {
         let c = sqlx::query!(
-           r#"
+            r#"
                 SELECT count(*) as open_sessions
                 FROM work_sessions 
                 WHERE end_time IS NULL
@@ -148,50 +155,86 @@ impl WorktimeDatabase {
         Ok(now)
     }
 
+    pub async fn get_session_by_id(&self, id: WorktimeSessionId) -> Result<WorktimeSession> {
+        let r = sqlx::query!(r#"
+                SELECT id, start_time as "start_time: NaiveDateTime", end_time as "end_time: NaiveDateTime"  
+                FROM work_sessions 
+                WHERE id = $1
+            "#, 
+            id.0
+        )
+            .fetch_one(&self.pool)
+            .await;
+
+        r.map(|row| WorktimeSession::from((row.id, row.start_time, row.end_time)))
+    }
+
     pub async fn insert_stop(
         &self,
         id: WorktimeSessionId,
         clock: &impl Clock,
     ) -> Result<NaiveDateTime> {
         let now = clock.get_now();
-        let updated = sqlx::query!(
+        self.update_end_time(id, &now).await?;
+        Ok(now)
+    }
+
+    pub async fn update_start_time(
+        &self,
+        id: WorktimeSessionId,
+        date_time: &NaiveDateTime,
+    ) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE work_sessions
+            SET start_time = $1
+            WHERE id = $2
+            "#,
+            date_time,
+            id.0
+        )
+        .execute(&self.pool)
+        .await
+        .and_then(result_from_rows_affected)
+    }
+
+    pub async fn update_end_time(
+        &self,
+        id: WorktimeSessionId,
+        date_time: &NaiveDateTime,
+    ) -> Result<()> {
+        sqlx::query!(
             r#"
             UPDATE work_sessions
             SET end_time = $1
             WHERE id = $2
             "#,
-            now,
+            date_time,
             id.0
         )
         .execute(&self.pool)
-        .await?;
-        if updated.rows_affected() == 1 {
-            Ok(now)
-        } else {
-            Err(Error::RowNotFound)
-        }
-    }
-
-    pub async fn get_session_by_id(&self, id: u32) -> WorktimeSession {
-        let r = sqlx::query!(r#"
-                SELECT id, start_time as "start_time: NaiveDateTime", end_time as "end_time: NaiveDateTime"  
-                FROM work_sessions 
-                WHERE id = $1
-            "#, 
-            id)
-            .fetch_one(&self.pool)
-            .await;
-        
-        r.map(|row| {
-            WorktimeSession::from((
-                row.id,
-                row.start_time,
-                row.end_time,
-            ))
-        }).expect(&format!("no work_session with id = '{id}'"))
+        .await
+        .and_then(result_from_rows_affected)
     }
 }
 
+// ####################
+// UTILS
+// ####################
+
+fn result_from_rows_affected(
+    query_result: sqlx::sqlite::SqliteQueryResult,
+) -> std::result::Result<(), Error> {
+    if query_result.rows_affected() == 1 {
+        Ok(())
+    } else {
+        Err(sqlx::Error::RowNotFound)
+    }
+}
+
+// ####################
+// CHECKS
+// ####################
 async fn sanity_check(pool: SqlitePool) -> Result<()> {
     let open_sessions = sqlx::query!(
         "
@@ -226,17 +269,17 @@ async fn sanity_check(pool: SqlitePool) -> Result<()> {
     all_sessions.into_iter().fold(
         None,
         |last_end, WorktimeSession { id, start, end }| {
-            if let Some(end) = end{ 
+            if let Some(end) = end {
                 assert!(
-                end >= start,
-                "Corrupt data - Session '{id}' end {end:?} before start {start:?}"
-            );
+                    end >= start,
+                    "Corrupt data - Session '{id}' end {end:?} before start {start:?}"
+                );
             }
             if let Some(last_end) = last_end{
-            assert!(
-                start >= last_end,
-                "Corrupt data - Session '{id}' overlap prev. end {last_end:?} after next start {start:?}"
-            );
+                assert!(
+                    start >= last_end,
+                    "Corrupt data - Session '{id}' overlap prev. end {last_end:?} after next start {start:?}"
+                );
             }
 
             end

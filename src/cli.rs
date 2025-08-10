@@ -1,6 +1,6 @@
 use crate::{
     DB_FILE_PATH,
-    db::{WorktimeDatabase, WorktimeSession},
+    db::{WorktimeDatabase, WorktimeSession, WorktimeSessionId},
     err::{CommandError, CommandResult},
     time::*,
 };
@@ -120,7 +120,10 @@ impl WorktimeCommand {
                 kind,
                 hours,
                 minutes,
-            } => self.correct(db, *id, *kind, *hours, *minutes).await,
+            } => {
+                self.correct(db, WorktimeSessionId::from(*id), *kind, *hours, *minutes)
+                    .await
+            }
             WorktimeCommand::Sql => self.sqlite(),
             WorktimeCommand::InternalHelp => self.help(),
             WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
@@ -201,22 +204,30 @@ impl WorktimeCommand {
     async fn correct(
         &self,
         db: &WorktimeDatabase,
-        id: u32,
+        id: WorktimeSessionId,
         kind: CorrectionKind,
         hours: u8,
         minutes: u8,
     ) -> Result<String, CommandError> {
-        let s = db.get_session_by_id(id).await;
+        let session = db.get_session_by_id(id).await?;
 
-        let d = s.start.date().and_time(
+        let date_time = session.start.date().and_time(
             NaiveTime::from_hms_opt(hours as u32, minutes as u32, 0).expect("cannot build time"),
         );
 
-        let t = match kind {
-            CorrectionKind::Start => todo!(),
-            CorrectionKind::End => todo!(),
-        };
-
-        todo!()
+        match kind {
+            CorrectionKind::Start => Ok(db.update_start_time(id, &date_time).await.map(|()| {
+                format!(
+                    "Start time of '{id}' has been updated to '{}'",
+                    display_time(&date_time)
+                )
+            })?),
+            CorrectionKind::End => Ok(db.update_end_time(id, &date_time).await.map(|()| {
+                format!(
+                    "End time of '{id}' has been updated to '{}'",
+                    display_time(&date_time)
+                )
+            })?),
+        }
     }
 }

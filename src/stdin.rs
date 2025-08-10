@@ -16,7 +16,7 @@ pub trait StdIn {
 
 struct RealStdIn {}
 
-static THEME: LazyLock<ColorfulTheme> = LazyLock::new(|| ColorfulTheme::default());
+static THEME: LazyLock<ColorfulTheme> = LazyLock::new(ColorfulTheme::default);
 
 impl StdIn for RealStdIn {
     fn parse(&self) -> Option<WorktimeCommand> {
@@ -110,7 +110,7 @@ impl StdIn for RealStdIn {
 
         let kind = match kind_selection {
             0 => CorrectionKind::Start,
-            1 => CorrectionKind::Start,
+            1 => CorrectionKind::End,
             _ => unreachable!("User should only have two options"),
         };
 
