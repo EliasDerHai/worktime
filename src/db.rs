@@ -35,7 +35,7 @@ impl From<WorktimeSessionId> for u32 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WorktimeSession {
     pub id: WorktimeSessionId,
     pub start: NaiveDateTime,

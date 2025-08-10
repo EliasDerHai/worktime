@@ -16,7 +16,9 @@ pub trait StdIn {
 
 struct RealStdIn {}
 
-static THEME: LazyLock<ColorfulTheme> = LazyLock::new(ColorfulTheme::default);
+pub fn get_std_in() -> impl StdIn {
+    RealStdIn {}
+}
 
 impl StdIn for RealStdIn {
     fn parse(&self) -> Option<WorktimeCommand> {
@@ -32,24 +34,12 @@ impl StdIn for RealStdIn {
     }
 
     async fn prompt(&self, db: &WorktimeDatabase) -> WorktimeCommand {
-        let selection = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("What you want, bruv?")
-            .default(0)
-            .items(
-                MainMenuCommand::wrapped_iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice(),
-            )
-            .interact()
-            .expect("Can't print select prompt");
+        let selection = *prompt_selection(
+            "What you want, bruv?",
+            &MainMenuCommand::wrapped_iter().collect::<Vec<MainMenuCommand>>(),
+        );
 
-        let extended_comm = *MainMenuCommand::wrapped_iter()
-            .collect::<Vec<MainMenuCommand>>()
-            .get(selection)
-            .unwrap();
-
-        match extended_comm {
+        match selection {
             MainMenuCommand::Status => WorktimeCommand::Status,
             MainMenuCommand::Start => WorktimeCommand::Start,
             MainMenuCommand::Stop => WorktimeCommand::Stop,
@@ -62,22 +52,10 @@ impl StdIn for RealStdIn {
     }
 
     async fn prompt_report(&self) -> WorktimeCommand {
-        let selection = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("What report do you want, bruv?")
-            .default(0)
-            .items(
-                ReportKind::wrapped_iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice(),
-            )
-            .interact()
-            .expect("Can't print choices");
-
-        let kind = *ReportKind::wrapped_iter()
-            .collect::<Vec<ReportKind>>()
-            .get(selection)
-            .unwrap();
+        let kind = *prompt_selection(
+            "What report do you want, bruv?",
+            &ReportKind::wrapped_iter().collect::<Vec<ReportKind>>(),
+        );
 
         WorktimeCommand::Report { kind }
     }
@@ -87,32 +65,12 @@ impl StdIn for RealStdIn {
             .get_last_n_sessions(10)
             .await
             .expect("Failed to query previous sessions");
+        let session = prompt_selection("Which entry do you want to correct, bruv?", &last_sessions);
 
-        let session_selection = Select::with_theme(&*THEME)
-            .with_prompt("Which entry do you want to correct, bruv?")
-            .items(
-                last_sessions
-                    .iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice(),
-            )
-            .interact()
-            .expect("Can't print choices");
-
-        let selected_session = last_sessions.get(session_selection).unwrap();
-
-        let kind_selection = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("Start or end?")
-            .items(&["Start", "End"])
-            .interact()
-            .expect("Can't print choices");
-
-        let kind = match kind_selection {
-            0 => CorrectionKind::Start,
-            1 => CorrectionKind::End,
-            _ => unreachable!("User should only have two options"),
-        };
+        let kind = *prompt_selection(
+            "Start or end?",
+            &[CorrectionKind::Start, CorrectionKind::End],
+        );
 
         let hours_str: String = Input::with_theme(&*THEME)
             .with_prompt("Hour (HH, 00-23)")
@@ -147,7 +105,7 @@ impl StdIn for RealStdIn {
         let minutes: u8 = minutes_str.parse().unwrap();
 
         WorktimeCommand::Correct {
-            id: selected_session.id.into(),
+            id: session.id.into(),
             kind,
             hours,
             minutes,
@@ -155,8 +113,19 @@ impl StdIn for RealStdIn {
     }
 }
 
-pub fn get_std_in() -> impl StdIn {
-    RealStdIn {}
+//##########################################################
+// UTIL
+//##########################################################
+
+static THEME: LazyLock<ColorfulTheme> = LazyLock::new(ColorfulTheme::default);
+fn prompt_selection<'item, T: ToString>(prompt: &str, items: &'item [T]) -> &'item T {
+    let idx = Select::with_theme(&*THEME)
+        .default(0)
+        .with_prompt(prompt)
+        .items(items)
+        .interact()
+        .expect("Can't print choices");
+    items.get(idx).expect("selection can never be out of range")
 }
 
 //##########################################################
