@@ -57,8 +57,11 @@ async fn run_loop(
 mod tests {
     use super::*;
     use crate::{
-        cli::ReportKind, db::get_test_worktime_db, stdin::test_utils::MockStdIn,
-        stdout::test_utils::StdOutRecorder, time::test_utils::MockClock,
+        cli::ReportKind,
+        db::{WorktimeSession, get_test_worktime_db},
+        stdin::test_utils::MockStdIn,
+        stdout::test_utils::StdOutRecorder,
+        time::test_utils::MockClock,
     };
 
     async fn setup() -> (MockClock, StdOutRecorder, WorktimeDatabase) {
@@ -90,6 +93,13 @@ mod tests {
         assert_ends_with(last_out.as_str(), "6.00h");
     }
 
+    fn assert_ends_with(actual: &str, expected_end: &str) {
+        assert!(
+            actual.ends_with(expected_end),
+            "expected '{actual}' to end with '{expected_end}'"
+        );
+    }
+
     #[tokio::test]
     async fn should_record_workweek() {
         let (clock, mut recorder, db) = setup().await;
@@ -114,10 +124,53 @@ mod tests {
         assert_ends_with(last_out.as_str(), "40.00h");
     }
 
-    fn assert_ends_with(actual: &str, expected_end: &str) {
-        assert!(
-            actual.ends_with(expected_end),
-            "expected '{actual}' to end with '{expected_end}'"
+    #[tokio::test]
+    async fn should_correct() {
+        let (clock, mut recorder, db) = setup().await;
+
+        for day_offset in 0..5 {
+            clock.set(7 + day_offset, 9, 00); // 7 = Monday
+            let std_in: MockStdIn = vec![WorktimeCommand::Start].into();
+            run_loop(&clock, &db, &std_in, &mut recorder).await;
+
+            let std_in: MockStdIn = vec![WorktimeCommand::Stop].into();
+            clock.set(7 + day_offset, 17, 00); // 7 = Monday
+            run_loop(&clock, &db, &std_in, &mut recorder).await;
+        }
+
+        let id_of_wednesday = db
+            .get_last_n_sessions(3)
+            .await
+            .unwrap()
+            .last()
+            .unwrap()
+            .clone()
+            .id;
+
+        let std_in: MockStdIn = vec![
+            WorktimeCommand::Correct {
+                id: id_of_wednesday.into(),
+                kind: cli::CorrectionKind::Start,
+                hours: 7,
+                minutes: 30,
+            },
+            WorktimeCommand::Correct {
+                id: id_of_wednesday.into(),
+                kind: cli::CorrectionKind::End,
+                hours: 15,
+                minutes: 30,
+            },
+        ]
+        .into();
+        run_loop(&clock, &db, &std_in, &mut recorder).await;
+
+        let wednesday_corrected = db.get_session_by_id(id_of_wednesday).await.unwrap();
+        let expected = WorktimeSession::new(
+            id_of_wednesday,
+            clock.get(9, 7, 30),
+            Some(clock.get(9, 15, 30)),
         );
+
+        assert_eq!(expected, wednesday_corrected);
     }
 }

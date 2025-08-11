@@ -35,11 +35,17 @@ impl From<WorktimeSessionId> for u32 {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktimeSession {
     pub id: WorktimeSessionId,
     pub start: NaiveDateTime,
     pub end: Option<NaiveDateTime>,
+}
+
+impl WorktimeSession {
+    pub fn new(id: WorktimeSessionId, start: NaiveDateTime, end: Option<NaiveDateTime>) -> Self {
+        Self { id, start, end }
+    }
 }
 
 impl Display for WorktimeSession {

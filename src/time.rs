@@ -108,11 +108,20 @@ pub(crate) mod test_utils {
     }
 
     impl MockClock {
+        /// set the internal mock clock
         pub fn set(&self, d: u32, h: u32, m: u32) {
             *self.mock_time.borrow_mut() = NaiveDate::from_ymd_opt(2025, 7, d)
                 .unwrap()
                 .and_hms_opt(h, m, 0)
                 .unwrap();
+        }
+
+        /// convenience for getting the expectation
+        pub fn get(&self, d: u32, h: u32, m: u32) -> NaiveDateTime {
+            NaiveDate::from_ymd_opt(2025, 7, d)
+                .unwrap()
+                .and_hms_opt(h, m, 0)
+                .unwrap()
         }
     }
 }
