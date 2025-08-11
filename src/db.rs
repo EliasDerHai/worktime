@@ -43,6 +43,7 @@ pub struct WorktimeSession {
 }
 
 impl WorktimeSession {
+    #[allow(dead_code)]
     pub fn new(id: WorktimeSessionId, start: NaiveDateTime, end: Option<NaiveDateTime>) -> Self {
         Self { id, start, end }
     }
@@ -101,7 +102,7 @@ impl WorktimeDatabase {
         }
     }
 
-    pub async fn get_last_n_sessions(&self, n: u32) -> Result<Vec<WorktimeSession>> {
+    pub async fn get_last_n_sessions_desc(&self, n: u32) -> Result<Vec<WorktimeSession>> {
         let last = sqlx::query!("
                SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"  
                FROM work_sessions 
@@ -115,6 +116,27 @@ impl WorktimeDatabase {
             rows.iter()
                 .map(|r| WorktimeSession::from((r.id, r.start_time, r.end_time)))
                 .collect()
+        })
+    }
+
+    pub async fn get_nth_last_session(&self, n: u32) -> Result<WorktimeSession> {
+        let last = sqlx::query!(r#"
+               SELECT id, start_time as "start_time: NaiveDateTime", end_time as "end_time: NaiveDateTime"  
+               FROM work_sessions 
+               ORDER BY id desc 
+               LIMIT 1
+               OFFSET $1
+           "#, 
+            n
+        )
+        .fetch_optional(&self.pool)
+        .await;
+
+        last.and_then(|r_opt| {
+            match r_opt.map(|r| WorktimeSession::from((r.id, r.start_time, r.end_time))) {
+                Some(worktime) => Ok(worktime),
+                None => Err(sqlx::Error::RowNotFound),
+            }
         })
     }
 
@@ -161,6 +183,7 @@ impl WorktimeDatabase {
         Ok(now)
     }
 
+    #[allow(dead_code)]
     pub async fn get_session_by_id(&self, id: WorktimeSessionId) -> Result<WorktimeSession> {
         let r = sqlx::query!(r#"
                 SELECT id, start_time as "start_time: NaiveDateTime", end_time as "end_time: NaiveDateTime"  
@@ -332,6 +355,43 @@ mod tests {
 
         assert!(last_1.is_some());
         assert!(last_2.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_last() -> sqlx::Result<()> {
+        let clock = MockClock::default();
+        let db = get_test_worktime_db().await?;
+
+        clock.set(4, 8, 0);
+        db.insert_start(&clock).await.unwrap();
+        clock.set(4, 12, 0);
+        let id_1 = db.get_last_session().await.unwrap().unwrap().id;
+        db.insert_stop(id_1, &clock).await?;
+
+        clock.set(4, 13, 0);
+        db.insert_start(&clock).await.unwrap();
+        clock.set(4, 17, 0);
+        let id_2 = db.get_last_session().await.unwrap().unwrap().id;
+        db.insert_stop(id_2, &clock).await?;
+
+        clock.set(5, 8, 30);
+        db.insert_start(&clock).await.unwrap();
+        clock.set(5, 12, 0);
+        let id_3 = db.get_last_session().await.unwrap().unwrap().id;
+        db.insert_stop(id_3, &clock).await?;
+
+        assert_eq!(id_3, db.get_nth_last_session(0).await?.id);
+        assert_eq!(id_2, db.get_nth_last_session(1).await?.id);
+        assert_eq!(
+            vec![id_3, id_2],
+            db.get_last_n_sessions_desc(2)
+                .await?
+                .iter()
+                .map(|s| s.id)
+                .collect::<Vec<WorktimeSessionId>>()
+        );
+
         Ok(())
     }
 }

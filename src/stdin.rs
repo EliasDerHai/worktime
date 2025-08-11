@@ -63,7 +63,7 @@ impl StdIn for RealStdIn {
 
     async fn prompt_correct(&self, db: &WorktimeDatabase) -> WorktimeCommand {
         let last_sessions = db
-            .get_last_n_sessions(10)
+            .get_last_n_sessions_desc(10)
             .await
             .expect("Failed to query previous sessions");
         let session = prompt_selection("Which entry do you want to correct, bruv?", &last_sessions);
@@ -106,7 +106,10 @@ impl StdIn for RealStdIn {
             parse_hhmm(&time_input).expect("user-input should be validated already");
 
         WorktimeCommand::Correct {
-            id: session.id.into(),
+            nth_last: last_sessions
+                .iter()
+                .position(|s| s.id == session.id)
+                .unwrap() as u32,
             kind,
             hours,
             minutes,

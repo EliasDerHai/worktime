@@ -1,6 +1,6 @@
 use crate::{
     DB_FILE_PATH,
-    db::{WorktimeDatabase, WorktimeSession, WorktimeSessionId},
+    db::{WorktimeDatabase, WorktimeSession},
     err::{CommandError, CommandResult},
     time::*,
 };
@@ -33,10 +33,9 @@ pub enum WorktimeCommand {
     },
     /// Correct QoL - sets start/end of session with id to hours:minutes
     Correct {
-        /// The id of the row to change (if you're not a database yourself, you should probably do this the
-        /// interactive way...)
-        #[arg()]
-        id: u32,
+        /// n-th last session (0-based)
+        #[arg(default_value_t = 0)]
+        nth_last: u32,
         #[arg(value_enum, default_value_t = CorrectionKind::Start)]
         kind: CorrectionKind,
         #[arg()]
@@ -116,14 +115,11 @@ impl WorktimeCommand {
             WorktimeCommand::Stop => self.stop(db, clock).await,
             WorktimeCommand::Report { kind } => self.report(db, *kind, clock).await,
             WorktimeCommand::Correct {
-                id,
+                nth_last,
                 kind,
                 hours,
                 minutes,
-            } => {
-                self.correct(db, WorktimeSessionId::from(*id), *kind, *hours, *minutes)
-                    .await
-            }
+            } => self.correct(db, *nth_last, *kind, *hours, *minutes).await,
             WorktimeCommand::Sql => self.sqlite(),
             WorktimeCommand::InternalHelp => self.help(),
             WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
@@ -204,12 +200,13 @@ impl WorktimeCommand {
     async fn correct(
         &self,
         db: &WorktimeDatabase,
-        id: WorktimeSessionId,
+        nth_last: u32,
         kind: CorrectionKind,
         hours: u8,
         minutes: u8,
     ) -> Result<String, CommandError> {
-        let session = db.get_session_by_id(id).await?;
+        let session = db.get_nth_last_session(nth_last).await?;
+        let id = session.id;
 
         let date_time = session.start.date().and_time(
             NaiveTime::from_hms_opt(hours as u32, minutes as u32, 0).expect("cannot build time"),

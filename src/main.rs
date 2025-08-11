@@ -138,24 +138,17 @@ mod tests {
             run_loop(&clock, &db, &std_in, &mut recorder).await;
         }
 
-        let id_of_wednesday = db
-            .get_last_n_sessions(3)
-            .await
-            .unwrap()
-            .last()
-            .unwrap()
-            .clone()
-            .id;
+        let id_of_wednesday = db.get_nth_last_session(2).await.unwrap().id;
 
         let std_in: MockStdIn = vec![
             WorktimeCommand::Correct {
-                id: id_of_wednesday.into(),
+                nth_last: 2,
                 kind: cli::CorrectionKind::Start,
                 hours: 7,
                 minutes: 30,
             },
             WorktimeCommand::Correct {
-                id: id_of_wednesday.into(),
+                nth_last: 2,
                 kind: cli::CorrectionKind::End,
                 hours: 15,
                 minutes: 30,
