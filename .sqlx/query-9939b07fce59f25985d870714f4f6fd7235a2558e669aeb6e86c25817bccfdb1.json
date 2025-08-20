@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE work_sessions\n            SET start_time = $1\n            WHERE id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9939b07fce59f25985d870714f4f6fd7235a2558e669aeb6e86c25817bccfdb1"
+}

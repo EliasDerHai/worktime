@@ -1,4 +1,4 @@
-use crate::db::WorktimeSession;
+use crate::db::worktime_session::WorktimeSession;
 use chrono::{Datelike, Days, Local, NaiveDate, NaiveDateTime, TimeDelta, Weekday};
 
 //##########################################################

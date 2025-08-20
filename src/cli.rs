@@ -1,6 +1,6 @@
 use crate::{
     DB_FILE_PATH,
-    db::{WorktimeDatabase, WorktimeSession},
+    db::{WorktimeDatabase, worktime_session::WorktimeSession},
     err::{CommandError, CommandResult},
     time::*,
 };

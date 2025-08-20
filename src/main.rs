@@ -58,7 +58,7 @@ mod tests {
     use super::*;
     use crate::{
         cli::ReportKind,
-        db::{WorktimeSession, get_test_worktime_db},
+        db::{get_test_worktime_db, worktime_session::WorktimeSession},
         stdin::test_utils::MockStdIn,
         stdout::test_utils::StdOutRecorder,
         time::test_utils::MockClock,

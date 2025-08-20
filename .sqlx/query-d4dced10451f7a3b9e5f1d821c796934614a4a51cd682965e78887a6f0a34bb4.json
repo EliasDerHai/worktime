@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, date as \"date: NaiveDate\", kind as \"kind: TimeOffKind\"\n            FROM time_off \n            WHERE date = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "date: NaiveDate",
+        "ordinal": 1,
+        "type_info": "Date"
+      },
+      {
+        "name": "kind: TimeOffKind",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d4dced10451f7a3b9e5f1d821c796934614a4a51cd682965e78887a6f0a34bb4"
+}

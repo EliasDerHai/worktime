@@ -1,72 +1,18 @@
 use crate::{
+    db::{
+        time_off::{TimeOffEntry, TimeOffId, TimeOffKind},
+        worktime_session::{WorktimeSession, WorktimeSessionId},
+    },
     err::CommandResult,
-    time::{Clock, display_time},
+    time::Clock,
 };
 use chrono::{NaiveDate, NaiveDateTime};
 use sqlx::{Error, SqlitePool};
-use std::fmt::Display;
+
+pub mod time_off;
+pub mod worktime_session;
 
 type Result<T> = sqlx::Result<T>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct WorktimeSessionId(u32);
-
-impl Display for WorktimeSessionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
-    }
-}
-
-impl From<i64> for WorktimeSessionId {
-    fn from(value: i64) -> Self {
-        WorktimeSessionId(u32::try_from(value).unwrap())
-    }
-}
-
-impl From<u32> for WorktimeSessionId {
-    fn from(value: u32) -> Self {
-        WorktimeSessionId(value)
-    }
-}
-
-impl From<WorktimeSessionId> for u32 {
-    fn from(value: WorktimeSessionId) -> Self {
-        value.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktimeSession {
-    pub id: WorktimeSessionId,
-    pub start: NaiveDateTime,
-    pub end: Option<NaiveDateTime>,
-}
-
-impl WorktimeSession {
-    #[allow(dead_code)]
-    pub fn new(id: WorktimeSessionId, start: NaiveDateTime, end: Option<NaiveDateTime>) -> Self {
-        Self { id, start, end }
-    }
-}
-
-impl Display for WorktimeSession {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let id = &self.id;
-        let start = display_time(&self.start);
-        let end = &self
-            .end
-            .map(|t| display_time(&t).to_string())
-            .unwrap_or("-".to_string());
-        write!(f, "id: {id};start: {start};end: {end}")
-    }
-}
-
-impl From<(i64, NaiveDateTime, Option<NaiveDateTime>)> for WorktimeSession {
-    fn from((id, start, end): (i64, NaiveDateTime, Option<NaiveDateTime>)) -> Self {
-        let id = WorktimeSessionId::from(id);
-        Self { id, start, end }
-    }
-}
 
 pub struct WorktimeDatabase {
     pool: SqlitePool,
@@ -189,7 +135,7 @@ impl WorktimeDatabase {
                 SELECT id, start_time as "start_time: NaiveDateTime", end_time as "end_time: NaiveDateTime"  
                 FROM work_sessions 
                 WHERE id = $1
-            "#, 
+            "#,
             id.0
         )
             .fetch_one(&self.pool)
@@ -239,6 +185,65 @@ impl WorktimeDatabase {
             WHERE id = $2
             "#,
             date_time,
+            id.0
+        )
+        .execute(&self.pool)
+        .await
+        .and_then(result_from_rows_affected)
+    }
+
+    pub async fn insert_time_off(&self, date: NaiveDate, kind: TimeOffKind) -> Result<TimeOffId> {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO time_off (date, kind) VALUES ($1, $2)
+            "#,
+            date,
+            kind
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(TimeOffId::from(result.last_insert_rowid()))
+    }
+
+    pub async fn get_time_off_by_date(&self, date: NaiveDate) -> Result<Option<TimeOffEntry>> {
+        let result = sqlx::query!(
+            r#"
+            SELECT id, date as "date: NaiveDate", kind as "kind: TimeOffKind"
+            FROM time_off 
+            WHERE date = $1
+            "#,
+            date
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result.map(|row| TimeOffEntry::from((row.id, row.date, row.kind))))
+    }
+
+    pub async fn get_all_time_off(&self) -> Result<Vec<TimeOffEntry>> {
+        let results = sqlx::query!(
+            r#"
+            SELECT id, date as "date: NaiveDate", kind as "kind: TimeOffKind"
+            FROM time_off 
+            ORDER BY date ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(results
+            .into_iter()
+            .map(|row| TimeOffEntry::from((row.id, row.date, row.kind)))
+            .collect())
+    }
+
+    pub async fn delete_time_off(&self, id: TimeOffId) -> Result<()> {
+        sqlx::query!(
+            r#"
+            DELETE FROM time_off
+            WHERE id = $1
+            "#,
             id.0
         )
         .execute(&self.pool)

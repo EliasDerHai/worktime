@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            DELETE FROM time_off\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "048ea712a27bb2ae3f482ef5c13ce109a2b4accbf3d8ff4365893b6fc852b6fa"
+}
