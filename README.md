@@ -1,3 +1,4 @@
+Time tracking software is often bloated and I don't wanna have it in yet another browser-tab or app-window, but rather right where I work ... in the terminal 💻☜(ﾟヮﾟ☜)
 # Worktime
 
 ## Usage
