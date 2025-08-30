@@ -2,6 +2,8 @@
 
 ## Usage
 
+![worktime](https://github.com/user-attachments/assets/5fbb0958-25ca-43cd-a7f1-c7f36facb3a4)
+
 ```
 Usage: worktime <COMMAND>
 
