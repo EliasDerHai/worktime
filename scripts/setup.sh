@@ -6,4 +6,5 @@ cd $(git rev-parse --show-toplevel)
 touch comptime.db
 touch worktime.db
 
+cargo sqlx migrate run
 cargo build
