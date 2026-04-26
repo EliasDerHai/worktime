@@ -5,7 +5,7 @@ use crate::{
     http,
     time::*,
 };
-use chrono::{Datelike, NaiveTime};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime};
 use clap::{Parser, Subcommand};
 use std::{ops::Deref, process::Command};
 use strum::{Display, EnumIter, IntoEnumIterator};
@@ -101,6 +101,7 @@ pub enum ReportKind {
     Day,
     Week,
     Month,
+    Timeline,
 }
 
 #[derive(Default, Debug, Clone, Copy, clap::ValueEnum, EnumIter, Display)]
@@ -184,10 +185,29 @@ impl WorktimeCommand {
         kind: ReportKind,
         clock: &impl Clock,
     ) -> CommandResult {
+        if let ReportKind::Timeline = kind {
+            let sessions: Vec<WorktimeSession> = db
+                .get_all_sessions()
+                .await?
+                .into_iter()
+                .filter(|session| session.end.is_some())
+                .collect();
+
+            if sessions.is_empty() {
+                return Err(CommandError::Other("No completed sessions found!".into()));
+            } else {
+                let to = get_today(clock);
+                let from = sessions.first().map(|s| s.start.date()).unwrap_or(to);
+
+                return Ok(render_timeline(&sessions, from, to));
+            };
+        }
+
         let ref_day = match kind {
             ReportKind::Day => get_today(clock),
             ReportKind::Week => get_week_start(clock),
             ReportKind::Month => get_month_start(clock),
+            ReportKind::Timeline => unreachable!(),
         };
         let sessions = db.get_sessions_since(ref_day).await?;
         let delta = aggregate_session_times(&sessions, clock.get_now());
@@ -292,5 +312,131 @@ impl WorktimeCommand {
         }
 
         Ok(format!("{stored} holidays stored for {country_code}"))
+    }
+}
+
+fn render_timeline(sessions: &[WorktimeSession], from: NaiveDate, to: NaiveDate) -> String {
+    if from > to {
+        return "No sessions recorded yet".to_string();
+    }
+    let mut rows = Vec::new();
+    let mut day = from;
+    while day <= to {
+        let label = day.format("%a %Y-%m-%d").to_string();
+        let blocks: String = (0u32..24)
+            .map(|hour| {
+                if minutes_worked_in_hour(sessions, day, hour) >= 30 {
+                    '█'
+                } else {
+                    '░'
+                }
+            })
+            .collect();
+        rows.push(format!("{}  {}", label, blocks));
+        day = day.succ_opt().unwrap();
+    }
+    rows.join("\n")
+}
+
+fn minutes_worked_in_hour(sessions: &[WorktimeSession], date: NaiveDate, hour: u32) -> i64 {
+    let hour_start = date.and_time(NaiveTime::from_hms_opt(hour, 0, 0).unwrap());
+    let hour_end = if hour < 23 {
+        date.and_time(NaiveTime::from_hms_opt(hour + 1, 0, 0).unwrap())
+    } else {
+        date.succ_opt().unwrap().and_time(NaiveTime::MIN)
+    };
+
+    sessions
+        .iter()
+        .map(|s| {
+            let s_end = s.end.expect("must be completed session");
+            let overlap_start = s.start.max(hour_start);
+            let overlap_end = s_end.min(hour_end);
+            if overlap_end > overlap_start {
+                (overlap_end - overlap_start).num_minutes()
+            } else {
+                0
+            }
+        })
+        .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::array::from_ref;
+
+    use super::*;
+    use crate::db::worktime_session::WorktimeSessionId;
+
+    fn session(start: NaiveDateTime, end: Option<NaiveDateTime>) -> WorktimeSession {
+        WorktimeSession::new(WorktimeSessionId::from(0u32), start, end)
+    }
+
+    fn dt(y: i32, mo: u32, d: u32, h: u32, m: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(y, mo, d)
+            .unwrap()
+            .and_time(NaiveTime::from_hms_opt(h, m, 0).unwrap())
+    }
+
+    #[test]
+    fn filled_hours_for_standard_session() {
+        let s = session(dt(2026, 4, 21, 9, 0), Some(dt(2026, 4, 21, 17, 30)));
+        let day = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
+
+        for hour in 0u32..9 {
+            assert_eq!(minutes_worked_in_hour(from_ref(&s), day, hour), 0);
+        }
+        for hour in 9u32..17 {
+            assert_eq!(minutes_worked_in_hour(from_ref(&s), day, hour), 60);
+        }
+        assert_eq!(minutes_worked_in_hour(from_ref(&s), day, 17), 30);
+        for hour in 18u32..24 {
+            assert_eq!(minutes_worked_in_hour(from_ref(&s), day, hour), 0);
+        }
+    }
+
+    #[test]
+    fn empty_day_renders_all_light_blocks() {
+        let day = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
+        let output = render_timeline(&[], day, day);
+        assert!(output.contains(&"░".repeat(24)));
+        assert!(!output.contains('█'));
+    }
+
+    #[test]
+    fn exactly_30_min_is_filled() {
+        let s = session(dt(2026, 4, 21, 9, 0), Some(dt(2026, 4, 21, 9, 30)));
+        let day = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
+        assert_eq!(minutes_worked_in_hour(&[s], day, 9), 30);
+    }
+
+    #[test]
+    fn twenty_nine_min_is_not_filled() {
+        let s = session(dt(2026, 4, 21, 9, 1), Some(dt(2026, 4, 21, 9, 30)));
+        let day = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
+        assert_eq!(minutes_worked_in_hour(&[s], day, 9), 29);
+    }
+
+    #[test]
+    fn cross_midnight_session_splits_across_days() {
+        let s = session(dt(2026, 4, 21, 22, 0), Some(dt(2026, 4, 22, 2, 0)));
+        let day1 = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
+        let day2 = NaiveDate::from_ymd_opt(2026, 4, 22).unwrap();
+
+        assert_eq!(minutes_worked_in_hour(from_ref(&s), day1, 21), 0);
+        assert_eq!(minutes_worked_in_hour(from_ref(&s), day1, 22), 60);
+        assert_eq!(minutes_worked_in_hour(from_ref(&s), day1, 23), 60);
+        assert_eq!(minutes_worked_in_hour(from_ref(&s), day2, 0), 60);
+        assert_eq!(minutes_worked_in_hour(from_ref(&s), day2, 1), 60);
+        assert_eq!(minutes_worked_in_hour(from_ref(&s), day2, 2), 0);
+    }
+
+    #[test]
+    fn no_sessions_returns_message() {
+        let today = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
+        // from > to triggers the early return
+        let output = render_timeline(&[], today, today);
+        // should render a row for "today" (from == to, no sessions → all empty)
+        assert!(output.contains("░"));
     }
 }

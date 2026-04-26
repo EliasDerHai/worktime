@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, start_time as \"start_time: NaiveDateTime\", end_time as \"end_time: NaiveDateTime\"\n            FROM work_sessions\n            ORDER BY id asc\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "start_time: NaiveDateTime",
+        "ordinal": 1,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "end_time: NaiveDateTime",
+        "ordinal": 2,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "537eb5c2a6faafa18595f6e63ba0b4dbbf435bd468c3c403e7497069e9dfe6f7"
+}

@@ -285,6 +285,23 @@ impl WorktimeDatabase {
         .await?;
         Ok(())
     }
+
+    pub async fn get_all_sessions(&self) -> Result<Vec<WorktimeSession>> {
+        sqlx::query!(
+            r#"
+            SELECT id, start_time as "start_time: NaiveDateTime", end_time as "end_time: NaiveDateTime"
+            FROM work_sessions
+            ORDER BY id asc
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| {
+            rows.iter()
+                .map(|r| WorktimeSession::from((r.id, r.start_time, r.end_time)))
+                .collect()
+        })
+    }
 }
 
 // ####################
