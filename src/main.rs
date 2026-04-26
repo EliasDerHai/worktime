@@ -12,6 +12,7 @@ use time::{Clock, get_clock};
 mod cli;
 mod db;
 mod err;
+mod http;
 mod stdin;
 mod stdout;
 mod time;
