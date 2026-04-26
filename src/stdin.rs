@@ -1,11 +1,12 @@
 use crate::{
     cli::{Cli, CorrectionKind, MainMenuCommand, ReportKind, WorktimeCommand},
     db::WorktimeDatabase,
-    http,
+    http::{self, dtos::Country},
 };
 use chrono::{Datelike, Timelike};
 use clap::Parser;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
+use itertools::Itertools;
 use std::{collections::BTreeSet, env, sync::LazyLock};
 
 /// proxy for all stdin interaction for testability
@@ -120,9 +121,12 @@ impl StdIn for RealStdIn {
     }
 
     async fn prompt_sync_holidays(&self) -> WorktimeCommand {
-        let countries = http::fetch::get_countries(&http::CLIENT)
+        let countries: Vec<Country> = http::fetch::get_countries(&http::CLIENT)
             .await
-            .expect("Failed to fetch countries from API");
+            .expect("Failed to fetch countries from API")
+            .into_iter()
+            .sorted_by_key(|a| a.name.clone())
+            .collect();
 
         let country = prompt_selection("Select a country:", &countries);
 
