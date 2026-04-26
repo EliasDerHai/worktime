@@ -1,11 +1,12 @@
 use crate::{
     cli::{Cli, CorrectionKind, MainMenuCommand, ReportKind, WorktimeCommand},
     db::WorktimeDatabase,
+    http,
 };
-use chrono::Timelike;
+use chrono::{Datelike, Timelike};
 use clap::Parser;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
-use std::{env, sync::LazyLock};
+use std::{collections::BTreeSet, env, sync::LazyLock};
 
 /// proxy for all stdin interaction for testability
 pub trait StdIn {
@@ -13,6 +14,7 @@ pub trait StdIn {
     async fn prompt(&self, db: &WorktimeDatabase) -> WorktimeCommand;
     async fn prompt_report(&self) -> WorktimeCommand;
     async fn prompt_correct(&self, db: &WorktimeDatabase) -> WorktimeCommand;
+    async fn prompt_sync_holidays(&self) -> WorktimeCommand;
 }
 
 struct RealStdIn {}
@@ -45,6 +47,7 @@ impl StdIn for RealStdIn {
             MainMenuCommand::Start => WorktimeCommand::Start,
             MainMenuCommand::Stop => WorktimeCommand::Stop,
             MainMenuCommand::Report => self.prompt_report().await,
+            MainMenuCommand::SyncHolidays => self.prompt_sync_holidays().await,
             MainMenuCommand::Sql => WorktimeCommand::Sql,
             MainMenuCommand::Help => WorktimeCommand::InternalHelp,
             MainMenuCommand::Quit => WorktimeCommand::Quit,
@@ -115,6 +118,45 @@ impl StdIn for RealStdIn {
             minutes,
         }
     }
+
+    async fn prompt_sync_holidays(&self) -> WorktimeCommand {
+        let countries = http::fetch::get_countries(&http::CLIENT)
+            .await
+            .expect("Failed to fetch countries from API");
+
+        let country = prompt_selection("Select a country:", &countries);
+
+        let year = chrono::Local::now().year();
+        let holidays = http::fetch::get_public_holidays(&http::CLIENT, year, &country.country_code)
+            .await
+            .expect("Failed to fetch holidays from API");
+
+        let counties: Vec<String> = holidays
+            .iter()
+            .flat_map(|h| h.counties.iter().flatten().cloned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
+        let county = if counties.is_empty() {
+            None
+        } else {
+            let options: Vec<String> = std::iter::once("None - national only".to_string())
+                .chain(counties)
+                .collect();
+            let selection = prompt_selection("Select a county (or national only):", &options);
+            if selection == "None - national only" {
+                None
+            } else {
+                Some(selection.clone())
+            }
+        };
+
+        WorktimeCommand::SyncHolidays {
+            country_code: country.country_code.clone(),
+            county,
+        }
+    }
 }
 
 //##########################################################
@@ -138,14 +180,14 @@ fn parse_hhmm(s: &str) -> Result<(u8, u8), String> {
         .split_once(':')
         .ok_or_else(|| "Use HH:MM (e.g., 09:30)".to_string())?;
 
-    let h: u8 = h.parse().map_err(|_| "Hours must be 0–23".to_string())?;
-    let m: u8 = m.parse().map_err(|_| "Minutes must be 0–59".to_string())?;
+    let h: u8 = h.parse().map_err(|_| "Hours must be 0-23".to_string())?;
+    let m: u8 = m.parse().map_err(|_| "Minutes must be 0-59".to_string())?;
 
     if h > 23 {
-        return Err("Hours must be 0–23".into());
+        return Err("Hours must be 0-23".into());
     }
     if m > 59 {
-        return Err("Minutes must be 0–59".into());
+        return Err("Minutes must be 0-59".into());
     }
 
     Ok((h, m))
@@ -191,6 +233,13 @@ pub(crate) mod test_utils {
         }
 
         async fn prompt_correct(&self, _: &WorktimeDatabase) -> WorktimeCommand {
+            self.commands
+                .borrow_mut()
+                .next()
+                .unwrap_or(WorktimeCommand::Quit)
+        }
+
+        async fn prompt_sync_holidays(&self) -> WorktimeCommand {
             self.commands
                 .borrow_mut()
                 .next()

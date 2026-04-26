@@ -250,6 +250,41 @@ impl WorktimeDatabase {
         .await
         .and_then(result_from_rows_affected)
     }
+
+    pub async fn delete_holidays_for_year(&self, year: i32) -> Result<u64> {
+        let year_start = NaiveDate::from_ymd_opt(year, 1, 1).expect("valid year");
+        let year_end = NaiveDate::from_ymd_opt(year + 1, 1, 1).expect("valid year");
+        let result = sqlx::query!(
+            r#"
+            DELETE FROM time_off
+            WHERE kind = 'holiday'
+            AND date >= $1 AND date < $2
+            "#,
+            year_start,
+            year_end
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Returns `true` if the row was inserted, `false` if skipped due to a date conflict.
+    pub async fn insert_time_off_or_ignore(
+        &self,
+        date: NaiveDate,
+        kind: TimeOffKind,
+    ) -> Result<()> {
+        sqlx::query!(
+            r#"
+            INSERT INTO time_off (date, kind) VALUES ($1, $2)
+            "#,
+            date,
+            kind
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
 // ####################

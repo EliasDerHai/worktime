@@ -2,9 +2,10 @@ use crate::{
     DB_FILE_PATH,
     db::{WorktimeDatabase, worktime_session::WorktimeSession},
     err::{CommandError, CommandResult},
+    http,
     time::*,
 };
-use chrono::NaiveTime;
+use chrono::{Datelike, NaiveTime};
 use clap::{Parser, Subcommand};
 use std::{ops::Deref, process::Command};
 use strum::{Display, EnumIter, IntoEnumIterator};
@@ -17,7 +18,7 @@ pub struct Cli {
 }
 
 /// responsible for stdin/stdout & logic
-#[derive(Debug, Subcommand, Clone, Copy)]
+#[derive(Debug, Subcommand, Clone)]
 pub enum WorktimeCommand {
     /// Prints current state
     Status,
@@ -42,6 +43,12 @@ pub enum WorktimeCommand {
         hours: u8,
         #[arg()]
         minutes: u8,
+    },
+    /// Sync public holidays from the internet for the current year
+    #[command(skip)]
+    SyncHolidays {
+        country_code: String,
+        county: Option<String>,
     },
     /// Sqlite3
     Sql,
@@ -72,6 +79,8 @@ pub enum MainMenuCommand {
     Report,
     /// Correct QoL
     Correct,
+    /// Sync public holidays
+    SyncHolidays,
     /// Sqlite3
     Sql,
     /// Print Clap's help
@@ -120,6 +129,10 @@ impl WorktimeCommand {
                 hours,
                 minutes,
             } => self.correct(db, *nth_last, *kind, *hours, *minutes).await,
+            WorktimeCommand::SyncHolidays {
+                country_code,
+                county,
+            } => self.sync_holidays(db, clock, country_code, county).await,
             WorktimeCommand::Sql => self.sqlite(),
             WorktimeCommand::InternalHelp => self.help(),
             WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
@@ -226,5 +239,58 @@ impl WorktimeCommand {
                 )
             })?),
         }
+    }
+
+    async fn sync_holidays(
+        &self,
+        db: &WorktimeDatabase,
+        clock: &impl Clock,
+        country_code: &str,
+        county: &Option<String>,
+    ) -> CommandResult {
+        let year = clock.get_now().year();
+
+        let holidays = http::fetch::get_public_holidays(&http::CLIENT, year, country_code)
+            .await
+            .map_err(|e| CommandError::Other(format!("Failed to reach holiday API: {e}")))?;
+
+        if holidays.is_empty() {
+            return Ok(format!("No holidays found for {country_code} in {year}"));
+        }
+
+        db.delete_holidays_for_year(year).await?;
+
+        let results = holidays
+            .iter()
+            .filter(|holiday| match county {
+                None => holiday.counties.is_none(),
+                Some(county) => {
+                    holiday.counties.is_none()
+                        || holiday
+                            .counties
+                            .as_ref()
+                            .is_some_and(|counties| counties.contains(county))
+                }
+            })
+            .map(|holiday| {
+                db.insert_time_off_or_ignore(
+                    holiday.date,
+                    crate::db::time_off::TimeOffKind::Holiday,
+                )
+            });
+
+        let mut stored = 0;
+
+        for r in results {
+            match r.await {
+                Ok(()) => stored += 1,
+                Err(e) => {
+                    db.delete_holidays_for_year(year).await?;
+                    return Err(e.into());
+                }
+            }
+        }
+
+        Ok(format!("{stored} holidays stored for {country_code}"))
     }
 }

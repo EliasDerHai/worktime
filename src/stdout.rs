@@ -2,13 +2,13 @@ use crate::{cli::WorktimeCommand, err::CommandResult};
 
 /// proxy for all stdout interaction for testability
 pub trait StdOut {
-    fn print(&mut self, cmd: WorktimeCommand, r: CommandResult);
+    fn print(&mut self, cmd: &WorktimeCommand, r: CommandResult);
 }
 
 struct RealStdOut {}
 
 impl StdOut for RealStdOut {
-    fn print(&mut self, cmd: WorktimeCommand, r: CommandResult) {
+    fn print(&mut self, cmd: &WorktimeCommand, r: CommandResult) {
         match r {
             Ok(m) => println!("{m}"),
             Err(e) => match e {
@@ -45,7 +45,7 @@ pub(crate) mod test_utils {
     }
 
     impl StdOut for StdOutRecorder {
-        fn print(&mut self, _: WorktimeCommand, r: CommandResult) {
+        fn print(&mut self, _: &WorktimeCommand, r: CommandResult) {
             self.results.push(r);
         }
     }

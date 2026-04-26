@@ -1,5 +1,10 @@
-#[allow(unused)]
-mod dtos {
+use std::sync::LazyLock;
+
+pub static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
+pub mod dtos {
+    use std::fmt::Display;
+
     use chrono::NaiveDate;
     use serde::Deserialize;
 
@@ -10,7 +15,14 @@ mod dtos {
         pub name: String,
     }
 
+    impl Display for Country {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{} ({})", self.name, self.country_code)
+        }
+    }
+
     #[derive(Debug, Deserialize)]
+    #[allow(dead_code)]
     pub struct PublicHoliday {
         pub date: NaiveDate,
         #[serde(rename = "localName")]
@@ -29,8 +41,7 @@ mod dtos {
     }
 }
 
-#[allow(unused)]
-mod fetch {
+pub mod fetch {
     use reqwest::Client;
 
     use crate::http::dtos::{Country, PublicHoliday};
