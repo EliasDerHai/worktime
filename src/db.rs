@@ -1,5 +1,6 @@
 use crate::{
     db::{
+        config::Config,
         time_off::{TimeOffEntry, TimeOffId, TimeOffKind},
         worktime_session::{WorktimeSession, WorktimeSessionId},
     },
@@ -9,6 +10,7 @@ use crate::{
 use chrono::{NaiveDate, NaiveDateTime};
 use sqlx::{Error, SqlitePool};
 
+pub mod config;
 pub mod time_off;
 pub mod worktime_session;
 
@@ -192,13 +194,19 @@ impl WorktimeDatabase {
         .and_then(result_from_rows_affected)
     }
 
-    pub async fn insert_time_off(&self, date: NaiveDate, kind: TimeOffKind) -> Result<TimeOffId> {
+    pub async fn insert_time_off(
+        &self,
+        date: NaiveDate,
+        kind: TimeOffKind,
+        label: Option<&str>,
+    ) -> Result<TimeOffId> {
         let result = sqlx::query!(
             r#"
-            INSERT INTO time_off (date, kind) VALUES ($1, $2)
+            INSERT INTO time_off (date, kind, label) VALUES ($1, $2, $3)
             "#,
             date,
-            kind
+            kind,
+            label
         )
         .execute(&self.pool)
         .await?;
@@ -209,8 +217,8 @@ impl WorktimeDatabase {
     pub async fn get_time_off_by_date(&self, date: NaiveDate) -> Result<Option<TimeOffEntry>> {
         let result = sqlx::query!(
             r#"
-            SELECT id, date as "date: NaiveDate", kind as "kind: TimeOffKind"
-            FROM time_off 
+            SELECT id, date as "date: NaiveDate", kind as "kind: TimeOffKind", label
+            FROM time_off
             WHERE date = $1
             "#,
             date
@@ -218,14 +226,14 @@ impl WorktimeDatabase {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(result.map(|row| TimeOffEntry::from((row.id, row.date, row.kind))))
+        Ok(result.map(|row| TimeOffEntry::from((row.id, row.date, row.kind, row.label))))
     }
 
     pub async fn get_all_time_off(&self) -> Result<Vec<TimeOffEntry>> {
         let results = sqlx::query!(
             r#"
-            SELECT id, date as "date: NaiveDate", kind as "kind: TimeOffKind"
-            FROM time_off 
+            SELECT id, date as "date: NaiveDate", kind as "kind: TimeOffKind", label
+            FROM time_off
             ORDER BY date ASC
             "#
         )
@@ -234,8 +242,49 @@ impl WorktimeDatabase {
 
         Ok(results
             .into_iter()
-            .map(|row| TimeOffEntry::from((row.id, row.date, row.kind)))
+            .map(|row| TimeOffEntry::from((row.id, row.date, row.kind, row.label)))
             .collect())
+    }
+
+    pub async fn get_time_off_between_dates(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<TimeOffEntry>> {
+        let results = sqlx::query!(
+            r#"
+            SELECT id, date as "date: NaiveDate", kind as "kind: TimeOffKind", label
+            FROM time_off
+            WHERE date >= $1 AND date <= $2
+            ORDER BY date ASC
+            "#,
+            from,
+            to
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(results
+            .into_iter()
+            .map(|row| TimeOffEntry::from((row.id, row.date, row.kind, row.label)))
+            .collect())
+    }
+
+    pub async fn get_config(&self) -> Result<Config> {
+        let row = sqlx::query!(
+            r#"
+            SELECT hours_per_holiday, expected_weekly_hours
+            FROM config
+            LIMIT 1
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(Config {
+            hours_per_holiday: row.hours_per_holiday,
+            expected_weekly_hours: row.expected_weekly_hours,
+        })
     }
 
     pub async fn delete_time_off(&self, id: TimeOffId) -> Result<()> {
@@ -268,18 +317,19 @@ impl WorktimeDatabase {
         Ok(result.rows_affected())
     }
 
-    /// Returns `true` if the row was inserted, `false` if skipped due to a date conflict.
     pub async fn insert_time_off_or_ignore(
         &self,
         date: NaiveDate,
         kind: TimeOffKind,
+        label: Option<&str>,
     ) -> Result<()> {
         sqlx::query!(
             r#"
-            INSERT INTO time_off (date, kind) VALUES ($1, $2)
+            INSERT OR IGNORE INTO time_off (date, kind, label) VALUES ($1, $2, $3)
             "#,
             date,
-            kind
+            kind,
+            label
         )
         .execute(&self.pool)
         .await?;

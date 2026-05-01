@@ -1,12 +1,17 @@
 use crate::{
     DB_FILE_PATH,
-    db::{WorktimeDatabase, worktime_session::WorktimeSession},
+    db::{
+        WorktimeDatabase,
+        time_off::{TimeOffEntry, TimeOffKind},
+        worktime_session::WorktimeSession,
+    },
     err::{CommandError, CommandResult},
     http,
     time::*,
 };
-use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Datelike, NaiveDate, NaiveTime, Weekday};
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use std::{ops::Deref, process::Command};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
@@ -198,8 +203,8 @@ impl WorktimeCommand {
             } else {
                 let to = get_today(clock);
                 let from = sessions.first().map(|s| s.start.date()).unwrap_or(to);
-
-                return Ok(render_timeline(&sessions, from, to));
+                let time_off = db.get_time_off_between_dates(from, to).await?;
+                return Ok(render_timeline(&sessions, from, to, &time_off));
             };
         }
 
@@ -209,10 +214,48 @@ impl WorktimeCommand {
             ReportKind::Month => get_month_start(clock),
             ReportKind::Timeline => unreachable!(),
         };
+        let today = get_today(clock);
         let sessions = db.get_sessions_since(ref_day).await?;
         let delta = aggregate_session_times(&sessions, clock.get_now());
-        let hours = delta.num_minutes() as f64 / 60f64;
-        Ok(format!("{kind:?}'s balance: {hours:.2}h"))
+        let hours_worked = delta.num_minutes() as f64 / 60f64;
+
+        let config = db.get_config().await?;
+        let time_off = db.get_time_off_between_dates(ref_day, today).await?;
+
+        let daily_target = config.expected_weekly_hours / 5;
+
+        let working_weekdays: i64 = {
+            let mut count = 0i64;
+            let mut d = ref_day;
+            while d <= today {
+                if !matches!(d.weekday(), Weekday::Sat | Weekday::Sun) {
+                    count += 1;
+                }
+                d = d.succ_opt().unwrap();
+            }
+            count
+        };
+
+        let holiday_weekdays: i64 = time_off
+            .iter()
+            .filter(|e| {
+                e.kind == TimeOffKind::Holiday
+                    && !matches!(e.date.weekday(), Weekday::Sat | Weekday::Sun)
+            })
+            .count() as i64;
+
+        let expected_hours =
+            working_weekdays * daily_target - holiday_weekdays * config.hours_per_holiday;
+
+        let holiday_note = match holiday_weekdays {
+            0 => String::new(),
+            1 => " (1 holiday)".to_string(),
+            n => format!(" ({n} holidays)"),
+        };
+
+        Ok(format!(
+            "{kind:?}: {hours_worked:.1}h worked / {expected_hours}.0h expected{holiday_note}"
+        ))
     }
 
     fn sqlite(&self) -> CommandResult {
@@ -295,7 +338,8 @@ impl WorktimeCommand {
             .map(|holiday| {
                 db.insert_time_off_or_ignore(
                     holiday.date,
-                    crate::db::time_off::TimeOffKind::Holiday,
+                    TimeOffKind::Holiday,
+                    Some(holiday.name.as_str()),
                 )
             });
 
@@ -315,14 +359,19 @@ impl WorktimeCommand {
     }
 }
 
-fn render_timeline(sessions: &[WorktimeSession], from: NaiveDate, to: NaiveDate) -> String {
+fn render_timeline(
+    sessions: &[WorktimeSession],
+    from: NaiveDate,
+    to: NaiveDate,
+    time_off: &[TimeOffEntry],
+) -> String {
     if from > to {
         return "No sessions recorded yet".to_string();
     }
     let mut rows = Vec::new();
     let mut day = from;
     while day <= to {
-        let label = day.format("%a %Y-%m-%d").to_string();
+        let date_label = day.format("%a %Y-%m-%d").to_string();
         let blocks: String = (0u32..24)
             .map(|hour| {
                 if minutes_worked_in_hour(sessions, day, hour) >= 30 {
@@ -332,7 +381,27 @@ fn render_timeline(sessions: &[WorktimeSession], from: NaiveDate, to: NaiveDate)
                 }
             })
             .collect();
-        rows.push(format!("{}  {}", label, blocks));
+
+        let time_off_entry = time_off.iter().find(|e| e.date == day);
+        let is_holiday = time_off_entry.is_some_and(|e| e.kind == TimeOffKind::Holiday);
+        let is_weekend = matches!(day.weekday(), Weekday::Sat | Weekday::Sun);
+
+        let suffix = time_off_entry
+            .and_then(|e| e.label.as_deref())
+            .map(|l| format!("  {l}"))
+            .unwrap_or_default();
+
+        let row_text = format!("{}  {}{}", date_label, blocks, suffix);
+
+        let row = if is_holiday {
+            row_text.red().to_string()
+        } else if is_weekend {
+            row_text.truecolor(180, 80, 80).to_string()
+        } else {
+            row_text
+        };
+
+        rows.push(row);
         day = day.succ_opt().unwrap();
     }
     rows.join("\n")
@@ -348,9 +417,10 @@ fn minutes_worked_in_hour(sessions: &[WorktimeSession], date: NaiveDate, hour: u
 
     sessions
         .iter()
-        .map(|s| {
-            let s_end = s.end.expect("must be completed session");
-            let overlap_start = s.start.max(hour_start);
+        .filter(|session| session.end.is_some())
+        .map(|session| {
+            let s_end = session.end.unwrap();
+            let overlap_start = session.start.max(hour_start);
             let overlap_end = s_end.min(hour_end);
             if overlap_end > overlap_start {
                 (overlap_end - overlap_start).num_minutes()
@@ -367,6 +437,7 @@ mod tests {
 
     use super::*;
     use crate::db::worktime_session::WorktimeSessionId;
+    use chrono::NaiveDateTime;
 
     fn session(start: NaiveDateTime, end: Option<NaiveDateTime>) -> WorktimeSession {
         WorktimeSession::new(WorktimeSessionId::from(0u32), start, end)
@@ -398,7 +469,7 @@ mod tests {
     #[test]
     fn empty_day_renders_all_light_blocks() {
         let day = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
-        let output = render_timeline(&[], day, day);
+        let output = render_timeline(&[], day, day, &[]);
         assert!(output.contains(&"░".repeat(24)));
         assert!(!output.contains('█'));
     }
@@ -435,7 +506,7 @@ mod tests {
     fn no_sessions_returns_message() {
         let today = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
         // from > to triggers the early return
-        let output = render_timeline(&[], today, today);
+        let output = render_timeline(&[], today, today, &[]);
         // should render a row for "today" (from == to, no sessions → all empty)
         assert!(output.contains("░"));
     }

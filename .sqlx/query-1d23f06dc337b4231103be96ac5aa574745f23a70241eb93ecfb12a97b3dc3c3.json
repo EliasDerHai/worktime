@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, date as \"date: NaiveDate\", kind as \"kind: TimeOffKind\"\n            FROM time_off \n            ORDER BY date ASC\n            ",
+  "query": "\n            SELECT id, date as \"date: NaiveDate\", kind as \"kind: TimeOffKind\", label\n            FROM time_off\n            ORDER BY date ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "name": "kind: TimeOffKind",
         "ordinal": 2,
         "type_info": "Text"
+      },
+      {
+        "name": "label",
+        "ordinal": 3,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -25,8 +30,9 @@
     "nullable": [
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "74af6759b7db35b7bd9e6bdfcaef59474a4e99f788a69382078f1ca68f16b8b3"
+  "hash": "1d23f06dc337b4231103be96ac5aa574745f23a70241eb93ecfb12a97b3dc3c3"
 }

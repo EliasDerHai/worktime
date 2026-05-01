@@ -91,13 +91,9 @@ mod tests {
 
         let last_out = recorder.results.last().unwrap().clone().unwrap();
 
-        assert_ends_with(last_out.as_str(), "6.00h");
-    }
-
-    fn assert_ends_with(actual: &str, expected_end: &str) {
         assert!(
-            actual.ends_with(expected_end),
-            "expected '{actual}' to end with '{expected_end}'"
+            last_out.contains("6.0h worked"),
+            "expected '6.0h worked' in '{last_out}'"
         );
     }
 
@@ -122,7 +118,10 @@ mod tests {
         run_loop(&clock, &db, &std_in, &mut recorder).await;
         let last_out = recorder.results.last().unwrap().clone().unwrap();
 
-        assert_ends_with(last_out.as_str(), "40.00h");
+        assert!(
+            last_out.contains("40.0h worked"),
+            "expected '40.0h worked' in '{last_out}'"
+        );
     }
 
     #[tokio::test]

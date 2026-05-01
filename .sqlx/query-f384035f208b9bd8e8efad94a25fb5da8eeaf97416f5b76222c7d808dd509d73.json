@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, date as \"date: NaiveDate\", kind as \"kind: TimeOffKind\", label\n            FROM time_off\n            WHERE date >= $1 AND date <= $2\n            ORDER BY date ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "date: NaiveDate",
+        "ordinal": 1,
+        "type_info": "Date"
+      },
+      {
+        "name": "kind: TimeOffKind",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "label",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f384035f208b9bd8e8efad94a25fb5da8eeaf97416f5b76222c7d808dd509d73"
+}
