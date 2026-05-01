@@ -12,7 +12,7 @@ use crate::{
 use chrono::{Datelike, NaiveDate, NaiveTime, Weekday};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use std::{ops::Deref, process::Command};
+use std::{collections::HashSet, ops::Deref, process::Command};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
 #[derive(Parser)]
@@ -55,6 +55,13 @@ pub enum WorktimeCommand {
         country_code: String,
         county: Option<String>,
     },
+    /// Add vacation days for a date range
+    #[command(skip)]
+    AddVacation {
+        from: NaiveDate,
+        to: NaiveDate,
+        label: Option<String>,
+    },
     /// Sqlite3
     Sql,
     /// Prints Clap's help
@@ -86,6 +93,8 @@ pub enum MainMenuCommand {
     Correct,
     /// Sync public holidays
     SyncHolidays,
+    /// Add vacation days
+    AddVacation,
     /// Sqlite3
     Sql,
     /// Print Clap's help
@@ -139,6 +148,9 @@ impl WorktimeCommand {
                 country_code,
                 county,
             } => self.sync_holidays(db, clock, country_code, county).await,
+            WorktimeCommand::AddVacation { from, to, label } => {
+                self.add_vacation(db, *from, *to, label.as_deref()).await
+            }
             WorktimeCommand::Sql => self.sqlite(),
             WorktimeCommand::InternalHelp => self.help(),
             WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
@@ -236,25 +248,43 @@ impl WorktimeCommand {
             count
         };
 
+        let is_weekday = |e: &&TimeOffEntry| !matches!(e.date.weekday(), Weekday::Sat | Weekday::Sun);
+
         let holiday_weekdays: i64 = time_off
             .iter()
-            .filter(|e| {
-                e.kind == TimeOffKind::Holiday
-                    && !matches!(e.date.weekday(), Weekday::Sat | Weekday::Sun)
-            })
+            .filter(|e| e.kind == TimeOffKind::Holiday && is_weekday(e))
             .count() as i64;
 
-        let expected_hours =
-            working_weekdays * daily_target - holiday_weekdays * config.hours_per_holiday;
+        let vacation_weekdays: i64 = time_off
+            .iter()
+            .filter(|e| e.kind == TimeOffKind::Vacation && is_weekday(e))
+            .count() as i64;
 
-        let holiday_note = match holiday_weekdays {
-            0 => String::new(),
-            1 => " (1 holiday)".to_string(),
-            n => format!(" ({n} holidays)"),
+        let expected_hours = working_weekdays * daily_target
+            - holiday_weekdays * config.hours_per_holiday
+            - vacation_weekdays * config.hours_per_holiday;
+
+        let time_off_note = {
+            let holiday_part = match holiday_weekdays {
+                0 => None,
+                1 => Some("1 holiday".to_string()),
+                n => Some(format!("{n} holidays")),
+            };
+            let vacation_part = match vacation_weekdays {
+                0 => None,
+                1 => Some("1 vacation day".to_string()),
+                n => Some(format!("{n} vacation days")),
+            };
+            match (holiday_part, vacation_part) {
+                (None, None) => String::new(),
+                (Some(h), None) => format!(" ({h})"),
+                (None, Some(v)) => format!(" ({v})"),
+                (Some(h), Some(v)) => format!(" ({h}, {v})"),
+            }
         };
 
         Ok(format!(
-            "{kind:?}: {hours_worked:.1}h worked / {expected_hours}.0h expected{holiday_note}"
+            "{kind:?}: {hours_worked:.1}h worked / {expected_hours}.0h expected{time_off_note}"
         ))
     }
 
@@ -357,6 +387,46 @@ impl WorktimeCommand {
 
         Ok(format!("{stored} holidays stored for {country_code}"))
     }
+
+    async fn add_vacation(
+        &self,
+        db: &WorktimeDatabase,
+        from: NaiveDate,
+        to: NaiveDate,
+        label: Option<&str>,
+    ) -> CommandResult {
+        if from > to {
+            return Err(CommandError::Other("Start date must be before end date".into()));
+        }
+
+        let existing = db.get_time_off_between_dates(from, to).await?;
+        let existing_dates: HashSet<NaiveDate> = existing.iter().map(|e| e.date).collect();
+        let holiday_weekday_count = existing
+            .iter()
+            .filter(|e| {
+                e.kind == TimeOffKind::Holiday
+                    && !matches!(e.date.weekday(), Weekday::Sat | Weekday::Sun)
+            })
+            .count();
+
+        let mut added = 0usize;
+        let mut day = from;
+        while day <= to {
+            if !matches!(day.weekday(), Weekday::Sat | Weekday::Sun) && !existing_dates.contains(&day) {
+                db.insert_time_off_or_ignore(day, TimeOffKind::Vacation, label).await?;
+                added += 1;
+            }
+            day = day.succ_opt().unwrap();
+        }
+
+        let skip_note = match holiday_weekday_count {
+            0 => String::new(),
+            1 => ", skipped 1 public holiday".to_string(),
+            n => format!(", skipped {n} public holidays"),
+        };
+
+        Ok(format!("Added {added} vacation days ({from} – {to}{skip_note})"))
+    }
 }
 
 fn render_timeline(
@@ -384,6 +454,7 @@ fn render_timeline(
 
         let time_off_entry = time_off.iter().find(|e| e.date == day);
         let is_holiday = time_off_entry.is_some_and(|e| e.kind == TimeOffKind::Holiday);
+        let is_vacation = time_off_entry.is_some_and(|e| e.kind == TimeOffKind::Vacation);
         let is_weekend = matches!(day.weekday(), Weekday::Sat | Weekday::Sun);
 
         let suffix = time_off_entry
@@ -395,6 +466,8 @@ fn render_timeline(
 
         let row = if is_holiday {
             row_text.red().to_string()
+        } else if is_vacation {
+            row_text.yellow().to_string()
         } else if is_weekend {
             row_text.truecolor(180, 80, 80).to_string()
         } else {

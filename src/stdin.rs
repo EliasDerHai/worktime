@@ -3,7 +3,7 @@ use crate::{
     db::WorktimeDatabase,
     http::{self, dtos::Country},
 };
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike, NaiveDate, Timelike};
 use clap::Parser;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
 use itertools::Itertools;
@@ -16,6 +16,7 @@ pub trait StdIn {
     async fn prompt_report(&self) -> WorktimeCommand;
     async fn prompt_correct(&self, db: &WorktimeDatabase) -> WorktimeCommand;
     async fn prompt_sync_holidays(&self) -> WorktimeCommand;
+    async fn prompt_add_vacation(&self) -> WorktimeCommand;
 }
 
 struct RealStdIn {}
@@ -49,6 +50,7 @@ impl StdIn for RealStdIn {
             MainMenuCommand::Stop => WorktimeCommand::Stop,
             MainMenuCommand::Report => self.prompt_report().await,
             MainMenuCommand::SyncHolidays => self.prompt_sync_holidays().await,
+            MainMenuCommand::AddVacation => self.prompt_add_vacation().await,
             MainMenuCommand::Sql => WorktimeCommand::Sql,
             MainMenuCommand::Help => WorktimeCommand::InternalHelp,
             MainMenuCommand::Quit => WorktimeCommand::Quit,
@@ -161,6 +163,44 @@ impl StdIn for RealStdIn {
             county,
         }
     }
+
+    async fn prompt_add_vacation(&self) -> WorktimeCommand {
+        let parse_date = |s: &String| -> Result<(), String> {
+            NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map(|_| ())
+                .map_err(|_| "Use YYYY-MM-DD (e.g. 2026-06-01)".to_string())
+        };
+
+        let from_str: String = Input::with_theme(&*THEME)
+            .with_prompt("Vacation start date (YYYY-MM-DD)")
+            .validate_with(parse_date)
+            .interact_text()
+            .expect("Failed to read input");
+        let from = NaiveDate::parse_from_str(&from_str, "%Y-%m-%d").unwrap();
+
+        let to_str: String = Input::with_theme(&*THEME)
+            .with_prompt("Vacation end date (YYYY-MM-DD)")
+            .validate_with(|s: &String| {
+                let to = NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                    .map_err(|_| "Use YYYY-MM-DD (e.g. 2026-06-14)".to_string())?;
+                if to < from {
+                    return Err("End date must be on or after start date".to_string());
+                }
+                Ok(())
+            })
+            .interact_text()
+            .expect("Failed to read input");
+        let to = NaiveDate::parse_from_str(&to_str, "%Y-%m-%d").unwrap();
+
+        let label_str: String = Input::with_theme(&*THEME)
+            .with_prompt("Label (optional, press Enter to skip)")
+            .allow_empty(true)
+            .interact_text()
+            .expect("Failed to read input");
+        let label = if label_str.is_empty() { None } else { Some(label_str) };
+
+        WorktimeCommand::AddVacation { from, to, label }
+    }
 }
 
 //##########################################################
@@ -244,6 +284,13 @@ pub(crate) mod test_utils {
         }
 
         async fn prompt_sync_holidays(&self) -> WorktimeCommand {
+            self.commands
+                .borrow_mut()
+                .next()
+                .unwrap_or(WorktimeCommand::Quit)
+        }
+
+        async fn prompt_add_vacation(&self) -> WorktimeCommand {
             self.commands
                 .borrow_mut()
                 .next()
