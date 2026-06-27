@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     MIGRATOR.run(&pool).await?;
 
     let clock = get_clock();
-    let db = WorktimeDatabase::new(pool);
+    let db = WorktimeDatabase::new(pool, &clock).await?;
     let std_in = get_std_in();
     let mut std_out = get_std_out();
     run_loop(&clock, &db, &std_in, &mut std_out).await;

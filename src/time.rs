@@ -108,12 +108,22 @@ pub(crate) mod test_utils {
     }
 
     impl MockClock {
-        /// set the internal mock clock
         pub fn set(&self, d: u32, h: u32, m: u32) {
             *self.mock_time.borrow_mut() = NaiveDate::from_ymd_opt(2025, 7, d)
                 .unwrap()
                 .and_hms_opt(h, m, 0)
                 .unwrap();
+        }
+
+        /// advances the internal mock clock by `h` hours and returns the new time
+        pub fn add_hours(&self, h: u32) -> NaiveDateTime {
+            let advanced = self
+                .mock_time
+                .borrow()
+                .checked_add_signed(TimeDelta::hours(h.into()))
+                .unwrap();
+            *self.mock_time.borrow_mut() = advanced;
+            advanced
         }
 
         /// convenience for getting the expectation

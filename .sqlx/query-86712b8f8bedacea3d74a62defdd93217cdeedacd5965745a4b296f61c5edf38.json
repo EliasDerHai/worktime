@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT id, start_time as \"start_time: NaiveDateTime\"\n        FROM work_sessions\n        WHERE end_time IS NULL\n        ORDER BY id DESC LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "start_time: NaiveDateTime",
+        "ordinal": 1,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "86712b8f8bedacea3d74a62defdd93217cdeedacd5965745a4b296f61c5edf38"
+}

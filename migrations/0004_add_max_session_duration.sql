@@ -1,0 +1,1 @@
+ALTER TABLE config ADD COLUMN max_session_hours INTEGER NOT NULL DEFAULT 12;

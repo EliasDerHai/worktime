@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT hours_per_holiday, expected_weekly_hours\n            FROM config\n            LIMIT 1\n            ",
+  "query": "\n        SELECT hours_per_holiday, expected_weekly_hours, max_session_hours\n        FROM config\n        LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -12,6 +12,11 @@
         "name": "expected_weekly_hours",
         "ordinal": 1,
         "type_info": "Integer"
+      },
+      {
+        "name": "max_session_hours",
+        "ordinal": 2,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -19,8 +24,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "b13d58aaa63692a90161810b862fb3820d62e65de14c09a5da30d122e37881e4"
+  "hash": "ae64433724fd55612526f3213549c2873a8b938ada5fc8dd2927fbcb462aad88"
 }

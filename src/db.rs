@@ -7,7 +7,7 @@ use crate::{
     err::CommandResult,
     time::Clock,
 };
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{NaiveDate, NaiveDateTime, TimeDelta};
 use sqlx::{Error, SqlitePool};
 
 pub mod config;
@@ -21,12 +21,15 @@ pub struct WorktimeDatabase {
 }
 
 impl WorktimeDatabase {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub async fn new(pool: SqlitePool, clock: &impl Clock) -> Result<Self> {
+        clamp_overlong_sessions(&pool, clock).await?;
+
         let p2: SqlitePool = pool.clone();
         tokio::spawn(async move {
             let _ = sanity_check(p2).await;
         });
-        Self { pool }
+
+        Ok(Self { pool })
     }
 
     pub async fn get_last_session(&self) -> Result<Option<WorktimeSession>> {
@@ -271,20 +274,7 @@ impl WorktimeDatabase {
     }
 
     pub async fn get_config(&self) -> Result<Config> {
-        let row = sqlx::query!(
-            r#"
-            SELECT hours_per_holiday, expected_weekly_hours
-            FROM config
-            LIMIT 1
-            "#
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
-        Ok(Config {
-            hours_per_holiday: row.hours_per_holiday,
-            expected_weekly_hours: row.expected_weekly_hours,
-        })
+        read_config(&self.pool).await
     }
 
     pub async fn delete_time_off(&self, id: TimeOffId) -> Result<()> {
@@ -369,8 +359,81 @@ fn result_from_rows_affected(
 }
 
 // ####################
+// CONFIG
+// ####################
+
+pub(crate) async fn read_config(pool: &SqlitePool) -> Result<Config> {
+    let row = sqlx::query!(
+        r#"
+        SELECT hours_per_holiday, expected_weekly_hours, max_session_hours
+        FROM config
+        LIMIT 1
+        "#
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(Config {
+        hours_per_holiday: row.hours_per_holiday,
+        expected_weekly_hours: row.expected_weekly_hours,
+        max_session_hours: row.max_session_hours,
+    })
+}
+
+// ####################
+// CLEANUP
+// ####################
+
+async fn clamp_overlong_sessions(pool: &SqlitePool, clock: &impl Clock) -> Result<()> {
+    let max_hours = read_config(pool).await?.max_session_hours;
+    let now = clock.get_now();
+
+    // truncate completed over-long sessions
+    sqlx::query!(
+        r#"
+        UPDATE work_sessions
+        SET end_time = datetime(start_time, '+' || $1 || ' hours')
+        WHERE end_time IS NOT NULL
+          AND end_time > datetime(start_time, '+' || $1 || ' hours')
+        "#,
+        max_hours
+    )
+    .execute(pool)
+    .await?;
+
+    // close a stale open session using the Clock-provided `now`
+    let cap = TimeDelta::hours(max_hours);
+    let open = sqlx::query!(
+        r#"
+        SELECT id, start_time as "start_time: NaiveDateTime"
+        FROM work_sessions
+        WHERE end_time IS NULL
+        ORDER BY id DESC LIMIT 1
+        "#
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(row) = open {
+        let capped_end = row.start_time + cap;
+        if now > capped_end {
+            sqlx::query!(
+                "UPDATE work_sessions SET end_time = $1 WHERE id = $2",
+                capped_end,
+                row.id
+            )
+            .execute(pool)
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
+// ####################
 // CHECKS
 // ####################
+
 async fn sanity_check(pool: SqlitePool) -> Result<()> {
     let open_sessions = sqlx::query!(
         "
@@ -442,7 +505,10 @@ pub async fn get_test_worktime_db() -> Result<WorktimeDatabase> {
         .connect_with(opts)
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
-    Ok(WorktimeDatabase::new(pool))
+    // default MockClock time (epoch) means startup clamping is a no-op for the
+    // 2025-dated sessions tests insert; tests exercise clamping directly instead.
+    let clock = crate::time::test_utils::MockClock::default();
+    WorktimeDatabase::new(pool, &clock).await
 }
 
 #[cfg(test)]
@@ -498,6 +564,61 @@ mod tests {
                 .map(|s| s.id)
                 .collect::<Vec<WorktimeSessionId>>()
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn clamp_closes_stale_open_session() -> Result<()> {
+        let clock = MockClock::default();
+        let db = get_test_worktime_db().await?;
+
+        clock.set(4, 8, 0);
+        db.insert_start(&clock).await.unwrap();
+
+        clock.add_hours(13);
+        clamp_overlong_sessions(&db.pool, &clock).await?;
+
+        let session = db.get_last_session().await?.unwrap();
+        assert_eq!(session.end, Some(clock.get(4, 20, 0)));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn clamp_truncates_overlong_completed_session() -> Result<()> {
+        let clock = MockClock::default();
+        let db = get_test_worktime_db().await?;
+
+        clock.set(4, 6, 0);
+        db.insert_start(&clock).await.unwrap();
+        let id = db.get_last_session().await?.unwrap().id;
+        clock.set(4, 20, 0); // 14h session
+        db.insert_stop(id, &clock).await?;
+
+        // truncation of completed sessions is independent of "now"
+        clamp_overlong_sessions(&db.pool, &clock).await?;
+
+        let session = db.get_session_by_id(id).await?;
+        assert_eq!(session.end, Some(clock.get(4, 18, 0))); // 06:00 + 12h
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn clamp_leaves_open_session_within_cap() -> Result<()> {
+        let clock = MockClock::default();
+        let db = get_test_worktime_db().await?;
+
+        clock.set(4, 9, 0);
+        db.insert_start(&clock).await.unwrap();
+
+        // only 3h elapsed, still under the 12h cap
+        clock.add_hours(3);
+        clamp_overlong_sessions(&db.pool, &clock).await?;
+
+        let session = db.get_last_session().await?.unwrap();
+        assert_eq!(session.end, None);
 
         Ok(())
     }

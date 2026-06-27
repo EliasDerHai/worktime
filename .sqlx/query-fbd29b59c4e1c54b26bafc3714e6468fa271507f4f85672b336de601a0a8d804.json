@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE work_sessions\n        SET end_time = datetime(start_time, '+' || $1 || ' hours')\n        WHERE end_time IS NOT NULL\n          AND end_time > datetime(start_time, '+' || $1 || ' hours')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fbd29b59c4e1c54b26bafc3714e6468fa271507f4f85672b336de601a0a8d804"
+}

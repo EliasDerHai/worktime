@@ -27,8 +27,10 @@ or just run and let dialoguer guide you through ;)
 **Features/Ideas**
 
     - Sessions should be limited to 12h max (probably forgot to stop)
-    - add holiday concept
     - add tags (with default, configurable)
-    - add fancy report (svg; kind of like flamechart?)
     - add defrag (multiple sessions of selected day(s) will be defragmented into one session)
 
+**Done**
+
+    - add fancy report (svg; kind of like flamechart?)
+    - add holiday concept
