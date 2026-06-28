@@ -2,19 +2,21 @@ use crate::{
     cli::{Cli, CorrectionKind, MainMenuCommand, ReportKind, WorktimeCommand},
     db::WorktimeDatabase,
     http::{self, dtos::Country},
+    time::Clock,
 };
-use chrono::{Datelike, NaiveDate, Timelike};
+use chrono::{Datelike, Days, NaiveDate, Timelike};
 use clap::Parser;
-use dialoguer::{Input, Select, theme::ColorfulTheme};
+use dialoguer::{Input, MultiSelect, Select, theme::ColorfulTheme};
 use itertools::Itertools;
 use std::{collections::BTreeSet, env, sync::LazyLock};
 
 /// proxy for all stdin interaction for testability
 pub trait StdIn {
     fn parse(&self) -> Option<WorktimeCommand>;
-    async fn prompt(&self, db: &WorktimeDatabase) -> WorktimeCommand;
+    async fn prompt(&self, db: &WorktimeDatabase, clock: &impl Clock) -> WorktimeCommand;
     async fn prompt_report(&self) -> WorktimeCommand;
     async fn prompt_correct(&self, db: &WorktimeDatabase) -> WorktimeCommand;
+    async fn prompt_backfill(&self, db: &WorktimeDatabase, clock: &impl Clock) -> WorktimeCommand;
     async fn prompt_sync_holidays(&self) -> WorktimeCommand;
     async fn prompt_add_vacation(&self) -> WorktimeCommand;
 }
@@ -38,7 +40,7 @@ impl StdIn for RealStdIn {
         }
     }
 
-    async fn prompt(&self, db: &WorktimeDatabase) -> WorktimeCommand {
+    async fn prompt(&self, db: &WorktimeDatabase, clock: &impl Clock) -> WorktimeCommand {
         let selection = *prompt_selection(
             "What you want, bruv?",
             &MainMenuCommand::wrapped_iter().collect::<Vec<MainMenuCommand>>(),
@@ -55,6 +57,7 @@ impl StdIn for RealStdIn {
             MainMenuCommand::Help => WorktimeCommand::InternalHelp,
             MainMenuCommand::Quit => WorktimeCommand::Quit,
             MainMenuCommand::Correct => self.prompt_correct(db).await,
+            MainMenuCommand::Overwrite => self.prompt_backfill(db, clock).await,
         }
     }
 
@@ -90,15 +93,11 @@ impl StdIn for RealStdIn {
                 let updated_min = h as u32 * 60 + m as u32;
 
                 match (kind, end_min) {
-                    (CorrectionKind::Start, Some(end_min)) => {
-                        if updated_min > end_min {
-                            return Err("Start can't be after end!".to_string());
-                        }
+                    (CorrectionKind::Start, Some(end_min)) if updated_min > end_min => {
+                        return Err("Start can't be after end!".to_string());
                     }
-                    (CorrectionKind::End, _) => {
-                        if updated_min < start_min {
-                            return Err("Start can't be after end!".to_string());
-                        }
+                    (CorrectionKind::End, _) if updated_min < start_min => {
+                        return Err("Start can't be after end!".to_string());
                     }
                     _ => {}
                 }
@@ -197,9 +196,54 @@ impl StdIn for RealStdIn {
             .allow_empty(true)
             .interact_text()
             .expect("Failed to read input");
-        let label = if label_str.is_empty() { None } else { Some(label_str) };
+        let label = if label_str.is_empty() {
+            None
+        } else {
+            Some(label_str)
+        };
 
         WorktimeCommand::AddVacation { from, to, label }
+    }
+
+    async fn prompt_backfill(&self, db: &WorktimeDatabase, clock: &impl Clock) -> WorktimeCommand {
+        let today = clock.get_now().date();
+        let days: Vec<NaiveDate> = (0..90).map(|i| today - Days::new(i)).collect();
+        let sessions = db.get_all_sessions().await.expect("Couldn't load sessions");
+        let max_hours: u32 = db
+            .get_config()
+            .await
+            .expect("Couldn't load config")
+            .max_session_hours
+            .try_into()
+            .expect("should");
+
+        let selected_days = MultiSelect::with_theme(&*THEME)
+            .with_prompt("Select the days you want to overwrite, bruv:")
+            .max_length(14)
+            .items(&days.iter().map(|d| d.to_string()).collect::<Vec<String>>()) // todo add indicator that day has one or more sessions
+            .interact()
+            .expect("Can't print choices")
+            .into_iter()
+            .map(|i| *days.get(i).expect("Can't be out of bounds"))
+            .collect();
+
+        let hours_per_day = Input::with_theme(&*THEME)
+            .with_prompt("How many hours per day?")
+            .default(8u32)
+            .validate_with(|v: &u32| {
+                if *v <= max_hours {
+                    Ok(())
+                } else {
+                    Err("Too high")
+                }
+            })
+            .interact()
+            .expect("Can't print input");
+
+        WorktimeCommand::Overwrite {
+            days: selected_days,
+            hours_per_day,
+        }
     }
 }
 
@@ -262,7 +306,7 @@ pub(crate) mod test_utils {
             self.commands.borrow_mut().next()
         }
 
-        async fn prompt(&self, _: &WorktimeDatabase) -> WorktimeCommand {
+        async fn prompt(&self, _: &WorktimeDatabase, _: &impl Clock) -> WorktimeCommand {
             self.commands
                 .borrow_mut()
                 .next()
@@ -291,6 +335,13 @@ pub(crate) mod test_utils {
         }
 
         async fn prompt_add_vacation(&self) -> WorktimeCommand {
+            self.commands
+                .borrow_mut()
+                .next()
+                .unwrap_or(WorktimeCommand::Quit)
+        }
+
+        async fn prompt_backfill(&self, _: &WorktimeDatabase, _: &impl Clock) -> WorktimeCommand {
             self.commands
                 .borrow_mut()
                 .next()

@@ -49,6 +49,12 @@ pub enum WorktimeCommand {
         #[arg()]
         minutes: u8,
     },
+    /// Overwrite multiple days (no precise start-end)
+    #[command(skip)]
+    Overwrite {
+        days: Vec<NaiveDate>,
+        hours_per_day: u32,
+    },
     /// Sync public holidays from the internet for the current year
     #[command(skip)]
     SyncHolidays {
@@ -89,8 +95,10 @@ pub enum MainMenuCommand {
     Stop,
     /// Report today's total work time
     Report,
-    /// Correct QoL
+    /// Correct (update indiv start or end)
     Correct,
+    /// Correct (add/update multiple days)
+    Overwrite,
     /// Sync public holidays
     SyncHolidays,
     /// Add vacation days
@@ -144,6 +152,10 @@ impl WorktimeCommand {
                 hours,
                 minutes,
             } => self.correct(db, *nth_last, *kind, *hours, *minutes).await,
+            WorktimeCommand::Overwrite {
+                days,
+                hours_per_day,
+            } => todo!(),
             WorktimeCommand::SyncHolidays {
                 country_code,
                 county,
@@ -248,7 +260,8 @@ impl WorktimeCommand {
             count
         };
 
-        let is_weekday = |e: &&TimeOffEntry| !matches!(e.date.weekday(), Weekday::Sat | Weekday::Sun);
+        let is_weekday =
+            |e: &&TimeOffEntry| !matches!(e.date.weekday(), Weekday::Sat | Weekday::Sun);
 
         let holiday_weekdays: i64 = time_off
             .iter()
@@ -396,7 +409,9 @@ impl WorktimeCommand {
         label: Option<&str>,
     ) -> CommandResult {
         if from > to {
-            return Err(CommandError::Other("Start date must be before end date".into()));
+            return Err(CommandError::Other(
+                "Start date must be before end date".into(),
+            ));
         }
 
         let existing = db.get_time_off_between_dates(from, to).await?;
@@ -412,8 +427,11 @@ impl WorktimeCommand {
         let mut added = 0usize;
         let mut day = from;
         while day <= to {
-            if !matches!(day.weekday(), Weekday::Sat | Weekday::Sun) && !existing_dates.contains(&day) {
-                db.insert_time_off_or_ignore(day, TimeOffKind::Vacation, label).await?;
+            if !matches!(day.weekday(), Weekday::Sat | Weekday::Sun)
+                && !existing_dates.contains(&day)
+            {
+                db.insert_time_off_or_ignore(day, TimeOffKind::Vacation, label)
+                    .await?;
                 added += 1;
             }
             day = day.succ_opt().unwrap();
@@ -425,7 +443,9 @@ impl WorktimeCommand {
             n => format!(", skipped {n} public holidays"),
         };
 
-        Ok(format!("Added {added} vacation days ({from} – {to}{skip_note})"))
+        Ok(format!(
+            "Added {added} vacation days ({from} – {to}{skip_note})"
+        ))
     }
 }
 
