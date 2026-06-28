@@ -226,13 +226,9 @@ impl WorktimeCommand {
                 return Err(CommandError::Other("No completed sessions found!".into()));
             } else {
                 let to = get_today(clock);
-                let from = sessions
-                    .iter()
-                    .map(|s| s.start.date())
-                    .min()
-                    .unwrap_or(to);
+                let from = sessions.iter().map(|s| s.start.date()).min().unwrap_or(to);
                 let time_off = db.get_time_off_between_dates(from, to).await?;
-                return Ok(render_timeline(&sessions, from, to, &time_off));
+                return Ok(to_timeline(&sessions, from, to, &time_off).join("\n"));
             };
         }
 
@@ -467,14 +463,14 @@ impl WorktimeCommand {
     }
 }
 
-fn render_timeline(
+pub fn to_timeline(
     sessions: &[WorktimeSession],
     from: NaiveDate,
     to: NaiveDate,
     time_off: &[TimeOffEntry],
-) -> String {
+) -> Vec<String> {
     if from > to {
-        return "No sessions recorded yet".to_string();
+        return vec!["No sessions recorded yet".to_string()];
     }
     let mut rows = Vec::new();
     let mut day = from;
@@ -515,7 +511,7 @@ fn render_timeline(
         rows.push(row);
         day = day.succ_opt().unwrap();
     }
-    rows.join("\n")
+    rows
 }
 
 fn minutes_worked_in_hour(sessions: &[WorktimeSession], date: NaiveDate, hour: u32) -> i64 {
@@ -580,7 +576,7 @@ mod tests {
     #[test]
     fn empty_day_renders_all_light_blocks() {
         let day = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
-        let output = render_timeline(&[], day, day, &[]);
+        let output = to_timeline(&[], day, day, &[]).join("\n");
         assert!(output.contains(&"░".repeat(24)));
         assert!(!output.contains('█'));
     }
@@ -617,7 +613,7 @@ mod tests {
     fn no_sessions_returns_message() {
         let today = NaiveDate::from_ymd_opt(2026, 4, 21).unwrap();
         // from > to triggers the early return
-        let output = render_timeline(&[], today, today, &[]);
+        let output = to_timeline(&[], today, today, &[]).join("\n");
         // should render a row for "today" (from == to, no sessions → all empty)
         assert!(output.contains("░"));
     }

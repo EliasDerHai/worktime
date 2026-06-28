@@ -1,12 +1,12 @@
 use crate::{
-    cli::{Cli, CorrectionKind, MainMenuCommand, ReportKind, WorktimeCommand},
+    cli::{Cli, CorrectionKind, MainMenuCommand, ReportKind, WorktimeCommand, to_timeline},
     db::WorktimeDatabase,
     http::{self, dtos::Country},
     time::Clock,
 };
 use chrono::{Datelike, Days, NaiveDate, Timelike};
 use clap::Parser;
-use dialoguer::{Input, MultiSelect, Select, theme::ColorfulTheme};
+use dialoguer::{Input, MultiSelect, Select, console::Style, theme::ColorfulTheme};
 use itertools::Itertools;
 use std::{collections::BTreeSet, env, sync::LazyLock};
 
@@ -208,6 +208,7 @@ impl StdIn for RealStdIn {
     async fn prompt_backfill(&self, db: &WorktimeDatabase, clock: &impl Clock) -> WorktimeCommand {
         let today = clock.get_now().date();
         let days: Vec<NaiveDate> = (0..90).map(|i| today - Days::new(i)).collect();
+        let from = *days.last().unwrap();
         let sessions = db.get_all_sessions().await.expect("Couldn't load sessions");
         let max_hours: u32 = db
             .get_config()
@@ -217,10 +218,19 @@ impl StdIn for RealStdIn {
             .try_into()
             .expect("should");
 
+        let time_off = db
+            .get_time_off_between_dates(from, today)
+            .await
+            .expect("Could not fetch time-off dates");
+        let day_options: Vec<String> = to_timeline(&sessions, from, today, &time_off)
+            .into_iter()
+            .rev()
+            .collect();
+
         let selected_days = MultiSelect::with_theme(&*THEME)
             .with_prompt("Select the days you want to overwrite, bruv:")
             .max_length(14)
-            .items(&days.iter().map(|d| d.to_string()).collect::<Vec<String>>()) // todo add indicator that day has one or more sessions
+            .items(&day_options)
             .interact()
             .expect("Can't print choices")
             .into_iter()
@@ -251,7 +261,14 @@ impl StdIn for RealStdIn {
 // UTIL
 //##########################################################
 
-static THEME: LazyLock<ColorfulTheme> = LazyLock::new(ColorfulTheme::default);
+static THEME: LazyLock<ColorfulTheme> = LazyLock::new(|| ColorfulTheme {
+    // Use reverse video for the focused row instead of a foreground color.
+    // Rows are pre-colored (red/yellow for holidays/vacation); a fg color set by
+    // the theme would be overridden by the row's own color, hiding the focus.
+    // Reverse is an attribute, so it composes on top of any foreground.
+    active_item_style: Style::new().for_stderr().reverse(),
+    ..ColorfulTheme::default()
+});
 fn prompt_selection<'item, T: ToString>(prompt: &str, items: &'item [T]) -> &'item T {
     let idx = Select::with_theme(&*THEME)
         .default(0)
