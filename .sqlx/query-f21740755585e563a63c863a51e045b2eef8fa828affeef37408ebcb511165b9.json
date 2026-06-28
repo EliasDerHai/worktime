@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            DELETE FROM work_sessions\n            WHERE start_time >= $1 AND start_time < $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f21740755585e563a63c863a51e045b2eef8fa828affeef37408ebcb511165b9"
+}

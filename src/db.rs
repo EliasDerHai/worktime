@@ -7,7 +7,7 @@ use crate::{
     err::CommandResult,
     time::Clock,
 };
-use chrono::{NaiveDate, NaiveDateTime, TimeDelta};
+use chrono::{Days, NaiveDate, NaiveDateTime, TimeDelta, Timelike};
 use sqlx::{Error, SqlitePool};
 
 pub mod config;
@@ -341,6 +341,46 @@ impl WorktimeDatabase {
                 .map(|r| WorktimeSession::from((r.id, r.start_time, r.end_time)))
                 .collect()
         })
+    }
+
+    pub async fn remove_sessions_by_day(&self, d: NaiveDate) -> Result<()> {
+        let day_start = NaiveDateTime::from(d);
+        let day_end = NaiveDateTime::from(d)
+            .checked_add_days(Days::new(1))
+            .unwrap();
+        sqlx::query!(
+            r#"
+            DELETE FROM work_sessions
+            WHERE start_time >= $1 AND start_time < $2
+            "#,
+            day_start,
+            day_end
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn insert_session(&self, d: NaiveDate, hours_per_day: u32) -> CommandResult<()> {
+        let starting_hour = 8;
+        let day_start = NaiveDateTime::from(d)
+            .with_hour(starting_hour)
+            .ok_or("Worktime start should be < 24")?;
+        let day_end = NaiveDateTime::from(d)
+            .with_hour(starting_hour + hours_per_day)
+            .ok_or("Worktime end should be < 24 (default start + specified hours)")?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO work_sessions (start_time, end_time)
+            VALUES ($1, $2)
+            "#,
+            day_start,
+            day_end
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 

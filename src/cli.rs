@@ -155,7 +155,7 @@ impl WorktimeCommand {
             WorktimeCommand::Overwrite {
                 days,
                 hours_per_day,
-            } => todo!(),
+            } => self.overwrite_days(db, days, *hours_per_day).await,
             WorktimeCommand::SyncHolidays {
                 country_code,
                 county,
@@ -226,7 +226,11 @@ impl WorktimeCommand {
                 return Err(CommandError::Other("No completed sessions found!".into()));
             } else {
                 let to = get_today(clock);
-                let from = sessions.first().map(|s| s.start.date()).unwrap_or(to);
+                let from = sessions
+                    .iter()
+                    .map(|s| s.start.date())
+                    .min()
+                    .unwrap_or(to);
                 let time_off = db.get_time_off_between_dates(from, to).await?;
                 return Ok(render_timeline(&sessions, from, to, &time_off));
             };
@@ -446,6 +450,20 @@ impl WorktimeCommand {
         Ok(format!(
             "Added {added} vacation days ({from} – {to}{skip_note})"
         ))
+    }
+
+    async fn overwrite_days(
+        &self,
+        db: &WorktimeDatabase,
+        days: &[NaiveDate],
+        hours_per_day: u32,
+    ) -> Result<String, CommandError> {
+        for d in days {
+            db.remove_sessions_by_day(*d).await?;
+            db.insert_session(*d, hours_per_day).await?;
+        }
+
+        Ok(format!("Updated {} days", days.len()))
     }
 }
 
