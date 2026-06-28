@@ -1,6 +1,6 @@
 use crate::{
     cli::{Cli, CorrectionKind, MainMenuCommand, ReportKind, WorktimeCommand, to_timeline},
-    db::WorktimeDatabase,
+    db::{WorktimeDatabase, time_off::TimeOffId},
     http::{self, dtos::Country},
     time::Clock,
 };
@@ -19,6 +19,7 @@ pub trait StdIn {
     async fn prompt_backfill(&self, db: &WorktimeDatabase, clock: &impl Clock) -> WorktimeCommand;
     async fn prompt_sync_holidays(&self) -> WorktimeCommand;
     async fn prompt_add_vacation(&self) -> WorktimeCommand;
+    async fn prompt_remove_vacation(&self, db: &WorktimeDatabase) -> WorktimeCommand;
 }
 
 struct RealStdIn {}
@@ -53,6 +54,7 @@ impl StdIn for RealStdIn {
             MainMenuCommand::Report => self.prompt_report().await,
             MainMenuCommand::SyncHolidays => self.prompt_sync_holidays().await,
             MainMenuCommand::AddVacation => self.prompt_add_vacation().await,
+            MainMenuCommand::RemoveVacation => self.prompt_remove_vacation(db).await,
             MainMenuCommand::Sql => WorktimeCommand::Sql,
             MainMenuCommand::Help => WorktimeCommand::InternalHelp,
             MainMenuCommand::Quit => WorktimeCommand::Quit,
@@ -205,6 +207,52 @@ impl StdIn for RealStdIn {
         WorktimeCommand::AddVacation { from, to, label }
     }
 
+    async fn prompt_remove_vacation(&self, db: &WorktimeDatabase) -> WorktimeCommand {
+        let vacations = db
+            .get_all_vacations()
+            .await
+            .expect("Failed to load vacation days");
+
+        if vacations.is_empty() {
+            return WorktimeCommand::RemoveVacation {
+                ids: Vec::default(),
+                is_block_select: false,
+            };
+        }
+
+        let labels: Vec<String> = vacations
+            .iter()
+            .map(|v| match &v.label {
+                Some(l) => format!("{} ({l})", v.date.format("%a %Y-%m-%d")),
+                None => v.date.format("%a %Y-%m-%d").to_string(),
+            })
+            .collect();
+
+        let ids = MultiSelect::with_theme(&*THEME)
+            .with_prompt("Which vacation day do you want to remove, bruv?")
+            .items(&labels)
+            .interact()
+            .expect("Can't print choices")
+            .into_iter()
+            .map(|i| {
+                vacations
+                    .get(i)
+                    .expect("selection can never be out of range")
+                    .id
+            })
+            .collect::<Vec<TimeOffId>>();
+
+        let single_mode = "Selected day(s)";
+        let block_mode = "Selected day(s)";
+        let modes = vec![single_mode, block_mode];
+        let is_block_select = prompt_selection("Which selection style?", &modes) == &block_mode;
+
+        WorktimeCommand::RemoveVacation {
+            ids,
+            is_block_select,
+        }
+    }
+
     async fn prompt_backfill(&self, db: &WorktimeDatabase, clock: &impl Clock) -> WorktimeCommand {
         let today = clock.get_now().date();
         let days: Vec<NaiveDate> = (0..90).map(|i| today - Days::new(i)).collect();
@@ -269,6 +317,7 @@ static THEME: LazyLock<ColorfulTheme> = LazyLock::new(|| ColorfulTheme {
     active_item_style: Style::new().for_stderr().reverse(),
     ..ColorfulTheme::default()
 });
+
 fn prompt_selection<'item, T: ToString>(prompt: &str, items: &'item [T]) -> &'item T {
     let idx = Select::with_theme(&*THEME)
         .default(0)
@@ -277,6 +326,19 @@ fn prompt_selection<'item, T: ToString>(prompt: &str, items: &'item [T]) -> &'it
         .interact()
         .expect("Can't print choices");
     items.get(idx).expect("selection can never be out of range")
+}
+
+
+#[allow(dead_code)] // util
+fn prompt_multiselection<'item, T: ToString>(prompt: &str, items: &'item [T]) -> Vec<&'item T> {
+    MultiSelect::with_theme(&*THEME)
+        .with_prompt(prompt)
+        .items(items)
+        .interact()
+        .expect("Can't print choices")
+        .into_iter()
+        .map(|i| items.get(i).expect("selection can never be out of range"))
+        .collect::<Vec<&T>>()
 }
 
 /// returns (hours, minutes)
@@ -352,6 +414,13 @@ pub(crate) mod test_utils {
         }
 
         async fn prompt_add_vacation(&self) -> WorktimeCommand {
+            self.commands
+                .borrow_mut()
+                .next()
+                .unwrap_or(WorktimeCommand::Quit)
+        }
+
+        async fn prompt_remove_vacation(&self, _: &WorktimeDatabase) -> WorktimeCommand {
             self.commands
                 .borrow_mut()
                 .next()

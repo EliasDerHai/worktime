@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, date as \"date: NaiveDate\", kind as \"kind: TimeOffKind\", label\n            FROM time_off\n            ORDER BY date ASC\n            ",
+  "query": "\n            SELECT id, date as \"date: NaiveDate\", kind as \"kind: TimeOffKind\", label\n            FROM time_off\n            WHERE kind = 'vacation'\n            ORDER BY date ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -34,5 +34,5 @@
       true
     ]
   },
-  "hash": "1d23f06dc337b4231103be96ac5aa574745f23a70241eb93ecfb12a97b3dc3c3"
+  "hash": "eae34e03e391506dd5dbe4ae40e8ab08a577c0634ace31e4437c5102c8d004f5"
 }

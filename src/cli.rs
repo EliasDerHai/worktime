@@ -2,7 +2,7 @@ use crate::{
     DB_FILE_PATH,
     db::{
         WorktimeDatabase,
-        time_off::{TimeOffEntry, TimeOffKind},
+        time_off::{TimeOffEntry, TimeOffId, TimeOffKind},
         worktime_session::WorktimeSession,
     },
     err::{CommandError, CommandResult},
@@ -68,6 +68,12 @@ pub enum WorktimeCommand {
         to: NaiveDate,
         label: Option<String>,
     },
+    /// Remove vacatio day(s) (single or block)
+    #[command(skip)]
+    RemoveVacation {
+        ids: Vec<TimeOffId>,
+        is_block_select: bool,
+    },
     /// Sqlite3
     Sql,
     /// Prints Clap's help
@@ -103,6 +109,8 @@ pub enum MainMenuCommand {
     SyncHolidays,
     /// Add vacation days
     AddVacation,
+    /// Remove a vacation day
+    RemoveVacation,
     /// Sqlite3
     Sql,
     /// Print Clap's help
@@ -163,6 +171,10 @@ impl WorktimeCommand {
             WorktimeCommand::AddVacation { from, to, label } => {
                 self.add_vacation(db, *from, *to, label.as_deref()).await
             }
+            WorktimeCommand::RemoveVacation {
+                ids,
+                is_block_select,
+            } => self.remove_vacation(db, ids, *is_block_select).await,
             WorktimeCommand::Sql => self.sqlite(),
             WorktimeCommand::InternalHelp => self.help(),
             WorktimeCommand::Quit => Ok("See ya, bruv".to_string()),
@@ -446,6 +458,27 @@ impl WorktimeCommand {
         Ok(format!(
             "Added {added} vacation days ({from} – {to}{skip_note})"
         ))
+    }
+
+    async fn remove_vacation(
+        &self,
+        db: &WorktimeDatabase,
+        ids: &[TimeOffId],
+        is_block_select: bool,
+    ) -> CommandResult {
+        match is_block_select {
+            true => {
+                let removed = db.delete_vacation_block(ids).await?;
+                Ok(format!("Removed {removed} vacation entries (block)"))
+            }
+            false => {
+                let size = ids.len();
+                for id in ids.iter() {
+                    db.delete_time_off(*id).await?
+                }
+                Ok(format!("Removed {} vacation entries", size))
+            }
+        }
     }
 
     async fn overwrite_days(

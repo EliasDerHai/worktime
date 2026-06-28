@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                DELETE FROM time_off\n                WHERE kind = 'vacation'\n                AND date >= $1 AND date <= $2\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "c1700c36ce34cfbea7dad0b851312432eeb516bc9adc5132c888d87e626e5a9b"
+}
