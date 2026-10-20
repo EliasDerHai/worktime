@@ -275,15 +275,30 @@ impl StdIn for RealStdIn {
             .rev()
             .collect();
 
-        let selected_days = MultiSelect::with_theme(&*THEME)
-            .with_prompt("Select the days you want to overwrite, bruv:")
-            .max_length(14)
-            .items(&day_options)
-            .interact()
-            .expect("Can't print choices")
-            .into_iter()
-            .map(|i| *days.get(i).expect("Can't be out of bounds"))
-            .collect();
+        let selected_days: Vec<NaiveDate> = loop {
+            let picked = MultiSelect::with_theme(&*THEME)
+                .with_prompt("Select the days you want to overwrite, bruv (<space> to tick, <enter> to confirm, <esc> to abort):")
+                .max_length(14)
+                .items(&day_options)
+                .interact_opt()
+                .expect("Can't print choices");
+
+            match picked {
+                // escape case
+                None => return WorktimeCommand::Status,
+                // empty selection
+                Some(p) if p.is_empty() => {
+                    eprintln!("Nothing ticked, bruv - hit <space> on a day first.");
+                }
+                // actual selection
+                Some(p) => {
+                    break p
+                        .into_iter()
+                        .map(|i| *days.get(i).expect("Can't be out of bounds"))
+                        .collect();
+                }
+            }
+        };
 
         let hours_per_day = Input::with_theme(&*THEME)
             .with_prompt("How many hours per day?")
